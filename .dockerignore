@@ -1,0 +1,12 @@
+target/
+**/target/
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.env
+.git/
+.gitignore
+README.md
+opencode.jsonc
+backups/

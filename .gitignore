@@ -1,0 +1,17 @@
+# Environment
+.env
+*.local
+
+# Rust
+backend/target/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Backups (contain credentials and tokens)
+backups/
+
+# Tooling
+.DS_Store
+*.log
