@@ -6,35 +6,67 @@ function formatNumber(value: number) {
   return value.toLocaleString()
 }
 
-export function AdminDangerZone({ onReset }: { onReset: () => void }) {
-  const [confirm, setConfirm] = useState('')
-  const [busy, setBusy] = useState(false)
+type Props = {
+  onReset: () => void
+  onRemove: () => void
+}
+
+export function AdminDangerZone({ onReset, onRemove }: Props) {
+  const [resetConfirm, setResetConfirm] = useState('')
+  const [removeConfirm, setRemoveConfirm] = useState('')
+  const [busy, setBusy] = useState<'reset' | 'remove' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
-  async function reset() {
-    if (confirm !== 'RESET' || busy) return
+  async function resetVotes() {
+    if (resetConfirm !== 'RESET' || busy) return
 
     const confirmed = window.confirm(
       'Delete every vote, matchup history and Elo rating for the active playlist? This cannot be undone.',
     )
     if (!confirmed) return
 
-    setBusy(true)
+    setBusy('reset')
     setError(null)
     setNotice(null)
 
     try {
-      const result = await api.resetVotes(confirm)
+      const result = await api.resetVotes(resetConfirm)
       setNotice(
         `Reset complete — ${formatNumber(result.deleted_votes)} votes and ${formatNumber(result.deleted_matchups)} matchups removed.`,
       )
-      setConfirm('')
+      setResetConfirm('')
       onReset()
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'Reset failed')
     } finally {
-      setBusy(false)
+      setBusy(null)
+    }
+  }
+
+  async function removePlaylist() {
+    if (removeConfirm !== 'REMOVE' || busy) return
+
+    const confirmed = window.confirm(
+      'Remove the current playlist, including all its tracks, votes, matchups and ratings? Users, invites and the Spotify connection are kept.',
+    )
+    if (!confirmed) return
+
+    setBusy('remove')
+    setError(null)
+    setNotice(null)
+
+    try {
+      const result = await api.removePlaylist(removeConfirm)
+      setNotice(
+        `Playlist removed — ${formatNumber(result.removed_tracks)} tracks and ${formatNumber(result.removed_votes)} votes deleted.`,
+      )
+      setRemoveConfirm('')
+      onRemove()
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Could not remove the playlist')
+    } finally {
+      setBusy(null)
     }
   }
 
@@ -49,43 +81,75 @@ export function AdminDangerZone({ onReset }: { onReset: () => void }) {
         </span>
       </div>
 
-      <div className="p-5">
-        <p className="max-w-2xl text-sm leading-relaxed text-muted">
-          Delete all votes, matchups and Elo ratings for the active playlist, and
-          hide the shared chart. Users, invites and the imported playlist are
-          kept.
-        </p>
-
-        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-          <input
-            type="text"
-            value={confirm}
-            onChange={(event) => setConfirm(event.target.value.toUpperCase())}
-            placeholder="Type RESET"
-            className="field max-w-48 font-mono text-xs tracking-[0.18em]"
-            aria-label="Type RESET to confirm"
-          />
-          <button
-            type="button"
-            onClick={() => void reset()}
-            disabled={confirm !== 'RESET' || busy}
-            className="btn border-accent bg-accent hover:bg-accent/80"
-          >
-            {busy ? 'Resetting…' : 'Reset all votes'}
-          </button>
+      <div className="grid gap-4 p-5 sm:grid-cols-2">
+        <div className="border border-line bg-card p-4">
+          <p className="label">Votes &amp; rankings</p>
+          <p className="mt-2 text-sm leading-relaxed text-muted">
+            Delete all votes, matchups and Elo ratings for the active playlist,
+            and hide the shared chart. Users and invites are kept.
+          </p>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <input
+              type="text"
+              value={resetConfirm}
+              onChange={(event) => setResetConfirm(event.target.value.toUpperCase())}
+              placeholder="Type RESET"
+              className="field max-w-40 font-mono text-xs tracking-[0.18em]"
+              aria-label="Type RESET to confirm resetting votes"
+            />
+            <button
+              type="button"
+              onClick={() => void resetVotes()}
+              disabled={resetConfirm !== 'RESET' || busy !== null}
+              className="btn border-accent bg-accent hover:bg-accent/80"
+            >
+              {busy === 'reset' ? 'Resetting…' : 'Reset all votes'}
+            </button>
+          </div>
         </div>
 
-        {notice && (
-          <p className="mt-3 border-l-2 border-ok bg-ok/5 px-3 py-2 text-xs text-ok">
-            {notice}
+        <div className="border border-line bg-card p-4">
+          <p className="label">Playlist</p>
+          <p className="mt-2 text-sm leading-relaxed text-muted">
+            Remove the current playlist and return to the empty state. Its
+            tracks, votes, matchups and ratings are deleted. Users, invites and
+            the Spotify connection are kept.
           </p>
-        )}
-        {error && (
-          <p className="mt-3 border-l-2 border-accent bg-accent/5 px-3 py-2 text-xs text-accent">
-            {error}
-          </p>
-        )}
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <input
+              type="text"
+              value={removeConfirm}
+              onChange={(event) => setRemoveConfirm(event.target.value.toUpperCase())}
+              placeholder="Type REMOVE"
+              className="field max-w-40 font-mono text-xs tracking-[0.18em]"
+              aria-label="Type REMOVE to confirm removing the playlist"
+            />
+            <button
+              type="button"
+              onClick={() => void removePlaylist()}
+              disabled={removeConfirm !== 'REMOVE' || busy !== null}
+              className="btn border-accent bg-accent hover:bg-accent/80"
+            >
+              {busy === 'remove' ? 'Removing…' : 'Remove playlist'}
+            </button>
+          </div>
+        </div>
       </div>
+
+      {(notice || error) && (
+        <div className="px-5 pb-5">
+          {notice && (
+            <p className="border-l-2 border-ok bg-ok/5 px-3 py-2 text-xs text-ok">
+              {notice}
+            </p>
+          )}
+          {error && (
+            <p className="mt-3 border-l-2 border-accent bg-accent/5 px-3 py-2 text-xs text-accent">
+              {error}
+            </p>
+          )}
+        </div>
+      )}
     </section>
   )
 }

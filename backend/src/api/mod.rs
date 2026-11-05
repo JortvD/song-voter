@@ -31,6 +31,7 @@ pub fn router() -> Router<AppState> {
         .route("/admin/users", get(dashboard::users))
         .route("/admin/ranking", get(dashboard::ranking))
         .route("/admin/reset/votes", post(dashboard::reset_votes))
+        .route("/admin/playlist/remove", post(dashboard::remove_playlist))
         .route(
             "/admin/invites",
             get(admin::list_invites).post(admin::create_invite),

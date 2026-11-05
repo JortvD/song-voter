@@ -120,6 +120,8 @@ export function PreviewPlayer({
         <button
           type="button"
           onClick={toggle}
+          aria-label={playing ? 'Pause preview' : 'Play preview'}
+          aria-pressed={playing}
           className="grid h-8 w-12 shrink-0 place-items-center border border-ink bg-ink font-mono text-[8px] uppercase tracking-[0.1em] text-paper transition hover:border-accent hover:bg-accent"
         >
           {playing ? 'Pause' : 'Play'}

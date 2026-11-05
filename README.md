@@ -83,6 +83,7 @@ docker compose logs -f backend
 | `GET` | `/api/admin/users` | admin | Users with picks, matchups, last activity (`limit`, `offset`, `q`) |
 | `GET` | `/api/admin/ranking` | admin | Full ranking with Elo internals, even while hidden |
 | `POST` | `/api/admin/reset/votes` | admin | Reset all votes/matchups/ratings; requires `{"confirm":"RESET"}` |
+| `POST` | `/api/admin/playlist/remove` | admin | Remove the active playlist and all its data; requires `{"confirm":"REMOVE"}` |
 
 Example with curl:
 
@@ -190,9 +191,10 @@ snapshots, other users' votes on the same tracks remain intact.
 ## Voting screen
 
 - `/vote` shows two compact cards with album art, title, artists and a native
-  **30-second Spotify preview player**, sized to fit a desktop viewport. Play
-  with `A` / `B`, pick with `1` / `←` or `2` / `→`, and undo with `Z`. The
-  shortcut legend is always visible above the matchup.
+  **30-second Spotify preview player**, sized to fit a desktop viewport. Press
+  `Space` to play and switch between the two songs (starting with track A), `1`
+  or `2` to pick a side, and `Z` to undo. The currently playing card is outlined
+  and marked **Playing**; the shortcut legend is always visible above the matchup.
 - Spotify's embedded iframe shows a "Use the Spotify app" prompt that cannot be
   hidden from outside the iframe. The native preview player avoids it entirely;
   tracks without a preview show an **Open in Spotify** link instead.
@@ -223,6 +225,8 @@ snapshots, other users' votes on the same tracks remain intact.
 
 - **Overview** — total picks, picks today, matchups seen, active voters,
   registered accounts, songs compared and a 14-day picks-per-day chart.
+- **System** — backend version, environment, uptime and Postgres readiness,
+  visible only to the admin.
 - **People** — every account with picks, matchups seen, join date and last
   activity; server-side username search and pagination.
 - **Full ranking** — all tracks with Elo, comparisons and wins, even while the
@@ -230,8 +234,9 @@ snapshots, other users' votes on the same tracks remain intact.
 - **Operations** — playlist import, Spotify connection, reveal toggle, CSV
   export and invite management.
 - **Danger zone** — reset all votes, matchups and ratings for the active
-  playlist, and hide the chart. Requires typing `RESET` and keeps users,
-  invites and the playlist.
+  playlist (and hide the chart), or remove the playlist entirely to return to
+  the empty state. Both require typed confirmation; users, invites and the
+  Spotify connection are kept.
 
 ## Security, operations & backups
 

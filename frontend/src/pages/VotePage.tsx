@@ -20,6 +20,7 @@ type MatchupCardProps = {
   side: 'a' | 'b'
   track: MatchupTrack
   picked: boolean
+  playing: boolean
   disabled: boolean
   audioRef: RefObject<HTMLAudioElement | null>
   onPlayStateChange: (playing: boolean) => void
@@ -30,6 +31,7 @@ function MatchupCard({
   side,
   track,
   picked,
+  playing,
   disabled,
   audioRef,
   onPlayStateChange,
@@ -38,15 +40,21 @@ function MatchupCard({
   return (
     <article
       className={`panel flex flex-col transition duration-150 ${
-        picked ? 'border-accent shadow-[3px_3px_0_0_#cf4a2f]' : ''
-      }`}
+        playing ? 'outline outline-2 outline-offset-2 outline-ink' : ''
+      } ${picked ? 'border-accent shadow-[3px_3px_0_0_#cf4a2f]' : ''}`}
     >
       <div className="flex items-center justify-between gap-2 border-b border-line px-3.5 py-2">
         <span className="label">{side === 'a' ? 'Track A' : 'Track B'}</span>
-        <span className="flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-muted">
-          <Kbd>{side === 'a' ? 'A' : 'B'}</Kbd> play
-          <span className="text-muted/40">·</span>
-          <Kbd>{side === 'a' ? '1' : '2'}</Kbd> pick
+        <span className="flex items-center gap-2.5">
+          {playing && (
+            <span className="flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-ink">
+              <span className="size-1.5 animate-pulse bg-ok" />
+              Playing
+            </span>
+          )}
+          <span className="flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-muted">
+            <Kbd>{side === 'a' ? '1' : '2'}</Kbd> pick
+          </span>
         </span>
       </div>
 
@@ -118,13 +126,13 @@ function ShortcutLegend() {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border border-line bg-card px-3 py-1.5">
       <span className="label">Keys</span>
-      <LegendItem keys={['A']} label="play A" />
-      <LegendItem keys={['1', '←']} label="pick A" />
-      <LegendItem keys={['B']} label="play B" />
-      <LegendItem keys={['2', '→']} label="pick B" />
+      <LegendItem keys={['Space']} label="play / switch" />
+      <LegendItem keys={['1']} label="pick A" />
+      <LegendItem keys={['2']} label="pick B" />
       <LegendItem keys={['Z']} label="undo" />
       <span className="basis-full font-mono text-[8px] uppercase tracking-[0.12em] text-muted/60">
-        Shortcuts work while this page has focus.
+        Space starts with track A, then alternates. Shortcuts work while this page
+        has focus.
       </span>
     </div>
   )
@@ -145,15 +153,29 @@ function VoteScreen() {
   const [tracksSeen, setTracksSeen] = useState(0)
   const [comparedPairs, setComparedPairs] = useState(0)
   const [playlistName, setPlaylistName] = useState('')
+  const [playingSide, setPlayingSide] = useState<'a' | 'b' | null>(null)
 
   const audioA = useRef<HTMLAudioElement | null>(null)
   const audioB = useRef<HTMLAudioElement | null>(null)
+  const nextSide = useRef<'a' | 'b'>('a')
 
   const onPlayA = useCallback((playing: boolean) => {
-    if (playing) audioB.current?.pause()
+    if (playing) {
+      audioB.current?.pause()
+      nextSide.current = 'b'
+      setPlayingSide('a')
+    } else {
+      setPlayingSide((current) => (current === 'a' ? null : current))
+    }
   }, [])
   const onPlayB = useCallback((playing: boolean) => {
-    if (playing) audioA.current?.pause()
+    if (playing) {
+      audioA.current?.pause()
+      nextSide.current = 'a'
+      setPlayingSide('b')
+    } else {
+      setPlayingSide((current) => (current === 'b' ? null : current))
+    }
   }, [])
 
   const applyMatchup = useCallback((next: Matchup) => {
@@ -189,6 +211,24 @@ function VoteScreen() {
   useEffect(() => {
     if (user) void load()
   }, [user, load])
+
+  const matchupKey = matchup
+    ? `${matchup.track_a.id}:${matchup.track_b.id}`
+    : 'none'
+
+  useEffect(() => {
+    for (const audio of [audioA.current, audioB.current]) {
+      if (!audio) continue
+      try {
+        audio.pause()
+        audio.currentTime = 0
+      } catch {
+        // The preview may not have loaded metadata yet.
+      }
+    }
+    setPlayingSide(null)
+    nextSide.current = 'a'
+  }, [matchupKey])
 
   const vote = useCallback(
     async (trackId: string) => {
@@ -262,34 +302,35 @@ function VoteScreen() {
     }
   }, [undoing, voting, votesCast, playlistName, totalTracks])
 
-  const playSide = useCallback(
-    (side: 'a' | 'b') => {
-      if (!matchup) return
+  const playNext = useCallback(() => {
+    if (!matchup) return
 
-      const previewUrl =
-        side === 'a' ? matchup.track_a.preview_url : matchup.track_b.preview_url
-      const target = side === 'a' ? audioA.current : audioB.current
+    const side = nextSide.current
+    nextSide.current = side === 'a' ? 'b' : 'a'
 
-      if (!previewUrl || !target) {
-        setError('No Spotify preview is available for this song. Use “Open in Spotify” instead.')
-        return
-      }
+    const previewUrl =
+      side === 'a' ? matchup.track_a.preview_url : matchup.track_b.preview_url
+    const target = side === 'a' ? audioA.current : audioB.current
 
-      if (!target.paused) {
-        target.pause()
-        return
-      }
+    if (!previewUrl || !target) {
+      setError(`No Spotify preview is available for track ${side.toUpperCase()}.`)
+      return
+    }
 
-      const other = side === 'a' ? audioB.current : audioA.current
-      other?.pause()
+    const other = side === 'a' ? audioB.current : audioA.current
+    other?.pause()
 
-      void target
-        .play()
-        .then(() => setError(null))
-        .catch(() => setError('Could not play the Spotify preview.'))
-    },
-    [matchup],
-  )
+    try {
+      target.currentTime = 0
+    } catch {
+      // The preview may still be loading.
+    }
+
+    void target
+      .play()
+      .then(() => setError(null))
+      .catch(() => setError('Could not play the Spotify preview.'))
+  }, [matchup])
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -306,20 +347,20 @@ function VoteScreen() {
         return
       }
 
+      if (event.code === 'Space' || event.key === ' ') {
+        event.preventDefault()
+        playNext()
+        return
+      }
+
       const key = event.key.toLowerCase()
 
-      if (key === '1' || event.key === 'ArrowLeft') {
+      if (key === '1' || event.code === 'Numpad1') {
         event.preventDefault()
         void vote(matchup.track_a.id)
-      } else if (key === '2' || event.key === 'ArrowRight') {
+      } else if (key === '2' || event.code === 'Numpad2') {
         event.preventDefault()
         void vote(matchup.track_b.id)
-      } else if (key === 'a') {
-        event.preventDefault()
-        playSide('a')
-      } else if (key === 'b') {
-        event.preventDefault()
-        playSide('b')
       } else if (key === 'z' && votesCast > 0) {
         event.preventDefault()
         void undo()
@@ -328,7 +369,7 @@ function VoteScreen() {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [matchup, voting, undoing, votesCast, vote, undo, playSide])
+  }, [matchup, voting, undoing, votesCast, vote, undo, playNext])
 
   const progress =
     totalTracks > 0 ? Math.min(100, Math.round((tracksSeen / totalTracks) * 100)) : 0
@@ -424,6 +465,7 @@ function VoteScreen() {
               side="a"
               track={matchup.track_a}
               picked={pickedId === matchup.track_a.id}
+              playing={playingSide === 'a'}
               disabled={voting || undoing}
               audioRef={audioA}
               onPlayStateChange={onPlayA}
@@ -440,6 +482,7 @@ function VoteScreen() {
               side="b"
               track={matchup.track_b}
               picked={pickedId === matchup.track_b.id}
+              playing={playingSide === 'b'}
               disabled={voting || undoing}
               audioRef={audioB}
               onPlayStateChange={onPlayB}

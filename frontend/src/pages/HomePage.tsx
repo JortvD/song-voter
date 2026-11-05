@@ -5,7 +5,6 @@ import { AdminInvites } from '../components/AdminInvites'
 import { AdminPlaylist } from '../components/AdminPlaylist'
 import { AdminReveal } from '../components/AdminReveal'
 import { AuthCard } from '../components/AuthCard'
-import { StatusCard } from '../components/StatusCard'
 import { useAuth } from '../context/AuthContext'
 import type { User } from '../lib/types'
 
@@ -25,7 +24,7 @@ function HowItWorks() {
     },
     {
       title: 'Pick between two',
-      body: 'Play both songs with A and B, then press 1 or 2 to pick a side.',
+      body: 'Press Space to play and switch songs, then 1 or 2 to pick a side.',
     },
     {
       title: 'Watch it settle',
@@ -77,9 +76,9 @@ function WelcomePanel({ user }: { user: User }) {
           {user.username}.
         </h2>
         <p className="mt-4 max-w-md text-sm leading-relaxed text-muted">
-          Pick between two songs, over and over. Play them with A and B, pick
-          with 1 and 2. Your personal chart updates after every pick — the shared
-          ranking stays sealed until the reveal.
+          Pick between two songs, over and over. Press Space to play and switch,
+          pick with 1 and 2. Your personal chart updates after every pick — the
+          shared ranking stays sealed until the reveal.
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
           <Link to="/vote" className="btn">
@@ -159,11 +158,11 @@ export function HomePage() {
   return (
     <>
       <section className="border-b border-line">
-        <div className="mx-auto grid w-full max-w-6xl gap-10 px-5 py-14 sm:px-8 sm:py-20 lg:grid-cols-[1.45fr_0.85fr] lg:items-center lg:gap-16">
-          <div>
+        <div className="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
+          <div className="max-w-2xl">
             <p className="label flex items-center gap-2">
               <span className="size-1.5 bg-accent" />
-              Phase 08 / Hardened &amp; polished
+              A collaborative chart
             </p>
             <h1 className="mt-6 font-serif text-6xl leading-[0.92] tracking-[-0.02em] sm:text-7xl lg:text-8xl">
               Two songs.
@@ -203,7 +202,6 @@ export function HomePage() {
               )}
             </div>
           </div>
-          <StatusCard />
         </div>
       </section>
 

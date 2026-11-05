@@ -8,6 +8,7 @@ import { AdminRankingTable } from '../components/AdminRankingTable'
 import { AdminReveal } from '../components/AdminReveal'
 import { AdminUsers } from '../components/AdminUsers'
 import { RequireAdmin } from '../components/RequireAdmin'
+import { StatusCard } from '../components/StatusCard'
 import { ApiError, api } from '../lib/api'
 import type { DashboardStats } from '../lib/types'
 
@@ -203,8 +204,13 @@ function Dashboard() {
       </div>
 
       <div className="mt-8">
+        <SectionHeading number="02" title="Runtime" aside="Live health" />
+        <StatusCard />
+      </div>
+
+      <div className="mt-8">
         <SectionHeading
-          number="02"
+          number="03"
           title="People"
           aside={stats ? `${formatNumber(stats.total_users)} accounts` : undefined}
         />
@@ -213,7 +219,7 @@ function Dashboard() {
 
       <div className="mt-8">
         <SectionHeading
-          number="03"
+          number="04"
           title="Full ranking"
           aside={stats ? `${formatNumber(stats.total_tracks)} songs` : undefined}
         />
@@ -221,7 +227,7 @@ function Dashboard() {
       </div>
 
       <div className="mt-8">
-        <SectionHeading number="04" title="Operations" />
+        <SectionHeading number="05" title="Operations" />
         <div className="grid items-start gap-6 lg:grid-cols-[1.3fr_0.7fr]">
           <div className="space-y-6">
             <AdminPlaylist key={`playlist-${refreshKey}`} />
@@ -232,8 +238,8 @@ function Dashboard() {
       </div>
 
       <div className="mt-8">
-        <SectionHeading number="05" title="Danger zone" />
-        <AdminDangerZone onReset={refresh} />
+        <SectionHeading number="06" title="Danger zone" />
+        <AdminDangerZone onReset={refresh} onRemove={refresh} />
       </div>
     </>
   )

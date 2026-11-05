@@ -29,7 +29,11 @@ export function AdminRankingTable() {
         if (active) setData(next)
       })
       .catch((caught: unknown) => {
-        if (active) {
+        if (!active) return
+        if (caught instanceof ApiError && caught.status === 404) {
+          setData(null)
+          setError(null)
+        } else {
           setError(caught instanceof ApiError ? caught.message : 'Could not load the ranking')
         }
       })

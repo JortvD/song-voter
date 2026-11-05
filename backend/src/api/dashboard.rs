@@ -85,6 +85,18 @@ pub struct ResetResponse {
     deleted_matchups: u64,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RemovePlaylistRequest {
+    confirm: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RemovePlaylistResponse {
+    removed: bool,
+    removed_tracks: i64,
+    removed_votes: i64,
+}
+
 pub async fn stats(
     State(state): State<AppState>,
     _admin: AdminUser,
@@ -292,5 +304,59 @@ pub async fn reset_votes(
         reset: true,
         deleted_votes,
         deleted_matchups,
+    }))
+}
+
+pub async fn remove_playlist(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Json(payload): Json<RemovePlaylistRequest>,
+) -> Result<Json<RemovePlaylistResponse>, ApiError> {
+    if payload.confirm != "REMOVE" {
+        return Err(ApiError::bad_request(
+            "type REMOVE to confirm removing the playlist",
+        ));
+    }
+
+    let Some(playlist) = active_playlist(&state.db).await? else {
+        return Err(ApiError::NotFound(
+            "no active playlist has been imported yet".to_string(),
+        ));
+    };
+
+    let mut transaction = state.db.begin().await?;
+
+    let removed_tracks =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tracks WHERE playlist_id = $1")
+            .bind(playlist.id)
+            .fetch_one(&mut *transaction)
+            .await?;
+
+    let removed_votes =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM votes WHERE playlist_id = $1")
+            .bind(playlist.id)
+            .fetch_one(&mut *transaction)
+            .await?;
+
+    // Tracks, seen pairs and votes cascade with the playlist.
+    sqlx::query("DELETE FROM playlists WHERE id = $1")
+        .bind(playlist.id)
+        .execute(&mut *transaction)
+        .await?;
+
+    transaction.commit().await?;
+
+    tracing::warn!(
+        admin_id = %admin.0.id,
+        playlist_id = %playlist.id,
+        removed_tracks,
+        removed_votes,
+        "playlist removed"
+    );
+
+    Ok(Json(RemovePlaylistResponse {
+        removed: true,
+        removed_tracks,
+        removed_votes,
     }))
 }

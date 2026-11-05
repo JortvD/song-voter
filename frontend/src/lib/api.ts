@@ -133,4 +133,9 @@ export const api = {
       '/api/admin/reset/votes',
       { method: 'POST', body: { confirm } },
     ),
+  removePlaylist: (confirm: string) =>
+    request<{ removed: boolean; removed_tracks: number; removed_votes: number }>(
+      '/api/admin/playlist/remove',
+      { method: 'POST', body: { confirm } },
+    ),
 }

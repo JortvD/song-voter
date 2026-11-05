@@ -24,8 +24,8 @@ function App() {
 
       <footer className="mt-auto border-t border-ink/15">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-2 px-5 py-6 font-mono text-[9px] uppercase tracking-[0.18em] text-muted sm:flex-row sm:items-center sm:justify-between sm:px-8">
-          <span>Rust / React / PostgreSQL</span>
-          <span>Phase 08 / Hardening &amp; polish</span>
+          <span>ULL Top 2000</span>
+          <span>One pick at a time.</span>
         </div>
       </footer>
     </div>
