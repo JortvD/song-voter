@@ -47,7 +47,7 @@ export function AdminUsers() {
       })
       .catch((caught: unknown) => {
         if (active) {
-          setError(caught instanceof ApiError ? caught.message : 'Could not load users')
+          setError(caught instanceof ApiError ? caught.message : 'Could not load voters')
         }
       })
       .finally(() => {
@@ -78,7 +78,7 @@ export function AdminUsers() {
     <section className="panel">
       <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line px-5 py-3">
         <div>
-          <h2 className="label">Users</h2>
+          <h2 className="label">Voters</h2>
           <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
             {data ? `${formatNumber(data.total)} registered` : 'Loading…'}
           </p>
@@ -91,7 +91,7 @@ export function AdminUsers() {
             onChange={(event) => setQueryInput(event.target.value)}
             placeholder="Search username"
             className="field w-44 py-1.5 text-xs"
-            aria-label="Search users"
+            aria-label="Search voters"
           />
           <button type="submit" className="btn-ghost">
             Search
@@ -123,10 +123,10 @@ export function AdminUsers() {
               <table className="w-full min-w-[560px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-line font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
-                    <th className="pb-2 font-medium">User</th>
+                    <th className="pb-2 font-medium">Voter</th>
                     <th className="pb-2 text-right font-medium">Picks</th>
                     <th className="hidden pb-2 text-right font-medium sm:table-cell">
-                      Matchups
+                      Duels
                     </th>
                     <th className="hidden pb-2 font-medium md:table-cell">Joined</th>
                     <th className="pb-2 text-right font-medium">Last active</th>
@@ -187,7 +187,7 @@ export function AdminUsers() {
           </>
         ) : (
           <p className="border border-dashed border-line px-3 py-6 text-center text-xs text-muted">
-            {query ? `No users match “${query}”.` : 'No users yet.'}
+            {query ? `No voters match “${query}”.` : 'No voters yet.'}
           </p>
         )}
       </div>

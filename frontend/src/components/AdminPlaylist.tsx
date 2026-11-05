@@ -292,7 +292,7 @@ export function AdminPlaylist() {
 
         {result && (
           <p className="mt-4 border-l-2 border-ok bg-ok/5 px-3 py-2 text-xs text-ok">
-            {formatNumber(result.total_tracks)} tracks in the chart
+            {formatNumber(result.total_tracks)} tracks imported
             {result.skipped_tracks > 0
               ? ` — ${formatNumber(result.skipped_tracks)} unavailable items skipped`
               : ''}

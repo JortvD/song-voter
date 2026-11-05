@@ -23,27 +23,27 @@ export function Header() {
       <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-6 px-5 py-4 sm:px-8">
         <div className="flex items-center gap-6">
           <Link to="/" className="flex items-center gap-3">
-            <span className="grid size-9 place-items-center bg-ink font-serif text-lg leading-none text-paper">
-              U
+            <span className="grid size-9 place-items-center bg-ink font-serif text-sm leading-none tracking-[-0.03em] text-paper">
+              PV
             </span>
-            <span className="font-mono text-[10px] font-medium uppercase leading-relaxed tracking-[0.26em]">
-              ULL / Top 2000
+            <span className="font-mono text-[10px] font-medium uppercase leading-relaxed tracking-[0.22em]">
+              Playlist Voter
             </span>
           </Link>
 
           <nav className="hidden items-center gap-5 sm:flex">
             {user && (
               <>
-                <NavLink to="/vote" className={navClass}>
-                  Vote
+                <NavLink to="/duel" className={navClass}>
+                  Duel
                 </NavLink>
-                <NavLink to="/ranking" className={navClass}>
-                  Your chart
+                <NavLink to="/your-ranking" className={navClass}>
+                  Your Ranking
                 </NavLink>
               </>
             )}
-            <NavLink to="/chart" className={navClass}>
-              Chart
+            <NavLink to="/standings" className={navClass}>
+              Standings
             </NavLink>
             {user?.is_admin && (
               <NavLink to="/admin" className={navClass}>
@@ -80,16 +80,16 @@ export function Header() {
       <nav className="flex gap-5 border-t border-line px-5 py-2.5 sm:hidden">
         {user && (
           <>
-            <NavLink to="/vote" className={navClass}>
-              Vote
+            <NavLink to="/duel" className={navClass}>
+              Duel
             </NavLink>
-            <NavLink to="/ranking" className={navClass}>
-              Your chart
+            <NavLink to="/your-ranking" className={navClass}>
+              Your Ranking
             </NavLink>
           </>
         )}
-        <NavLink to="/chart" className={navClass}>
-          Chart
+        <NavLink to="/standings" className={navClass}>
+          Standings
         </NavLink>
         {user?.is_admin && (
           <NavLink to="/admin" className={navClass}>

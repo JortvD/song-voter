@@ -121,7 +121,7 @@ pub async fn public(
 
     if playlist.reveal_state != "revealed" {
         return Err(ApiError::Forbidden(
-            "the shared chart has not been revealed yet".to_string(),
+            "the standings have not been revealed yet".to_string(),
         ));
     }
 
@@ -223,7 +223,7 @@ pub async fn reveal(
         admin_id = %admin.0.id,
         playlist_id = %updated.id,
         revealed = payload.revealed,
-        "shared chart reveal state changed"
+        "standings reveal state changed"
     );
 
     Ok(Json(status))
@@ -272,7 +272,7 @@ pub async fn export_csv(
         admin_id = %admin.0.id,
         playlist_id = %playlist.id,
         rows = rows.len(),
-        "chart CSV exported"
+        "standings CSV exported"
     );
 
     Response::builder()
@@ -280,7 +280,7 @@ pub async fn export_csv(
         .header(header::CONTENT_TYPE, "text/csv; charset=utf-8")
         .header(
             header::CONTENT_DISPOSITION,
-            "attachment; filename=\"ull-top-2000.csv\"",
+            "attachment; filename=\"playlist-voter.csv\"",
         )
         .body(Body::from(csv))
         .map_err(|error| ApiError::internal(error))

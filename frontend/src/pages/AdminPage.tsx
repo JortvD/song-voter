@@ -100,7 +100,7 @@ function Dashboard() {
           </h1>
           <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
             {stats?.playlist_name ?? 'No active playlist'} ·{' '}
-            {stats?.revealed ? 'Chart live' : 'Chart sealed'}
+            {stats?.revealed ? 'Standings live' : 'Standings sealed'}
           </p>
         </div>
 
@@ -109,8 +109,8 @@ function Dashboard() {
             {loading ? 'Refreshing…' : 'Refresh'}
           </button>
           {stats?.revealed && (
-            <Link to="/chart" className="btn-ghost">
-              Public chart
+            <Link to="/standings" className="btn-ghost">
+              Public standings
             </Link>
           )}
           <Link to="/" className="btn-ghost">
@@ -132,7 +132,7 @@ function Dashboard() {
           hint={stats ? `${formatNumber(stats.votes_today)} today` : undefined}
         />
         <StatCard
-          label="Matchups"
+          label="Duels"
           value={stats ? formatNumber(stats.total_matchups) : '—'}
           hint="pairs compared"
         />
@@ -211,7 +211,7 @@ function Dashboard() {
       <div className="mt-8">
         <SectionHeading
           number="03"
-          title="People"
+          title="Voters"
           aside={stats ? `${formatNumber(stats.total_users)} accounts` : undefined}
         />
         <AdminUsers key={`users-${refreshKey}`} />
@@ -220,7 +220,7 @@ function Dashboard() {
       <div className="mt-8">
         <SectionHeading
           number="04"
-          title="Full ranking"
+          title="Standings"
           aside={stats ? `${formatNumber(stats.total_tracks)} songs` : undefined}
         />
         <AdminRankingTable key={`ranking-${refreshKey}`} />

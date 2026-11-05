@@ -33,7 +33,7 @@ export function ChartPage() {
       })
       .catch((caught: unknown) => {
         if (active) {
-          setError(caught instanceof ApiError ? caught.message : 'Could not load the chart status')
+          setError(caught instanceof ApiError ? caught.message : 'Could not load the standings status')
         }
       })
       .finally(() => {
@@ -63,13 +63,13 @@ export function ChartPage() {
       .catch((caught: unknown) => {
         if (!active) return
         if (caught instanceof ApiError && caught.status === 403) {
-          // The admin hid the chart again while this page was open.
+          // The admin sealed the standings again while this page was open.
           setStatus((previous) =>
             previous ? { ...previous, revealed: false } : previous,
           )
           setChart(null)
         } else {
-          setError(caught instanceof ApiError ? caught.message : 'Could not load the chart')
+          setError(caught instanceof ApiError ? caught.message : 'Could not load the standings')
         }
       })
       .finally(() => {
@@ -92,7 +92,7 @@ export function ChartPage() {
         setChart(await api.getPublicChart(offset, PAGE_SIZE, query))
       }
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'Could not refresh the chart')
+      setError(caught instanceof ApiError ? caught.message : 'Could not refresh the standings')
     } finally {
       setRefreshing(false)
     }
@@ -127,7 +127,7 @@ export function ChartPage() {
     return (
       <section className="panel p-6 text-center">
         <p className="label">Unavailable</p>
-        <h1 className="mt-3 font-serif text-3xl">The chart could not load.</h1>
+        <h1 className="mt-3 font-serif text-3xl">The standings could not load.</h1>
         <p className="mt-3 text-sm text-muted">{error}</p>
         <Link to="/" className="btn mt-5 inline-flex">
           Back home
@@ -141,7 +141,7 @@ export function ChartPage() {
   if (!status.playlist_name) {
     return (
       <section className="panel p-6 text-center sm:p-10">
-        <p className="label">No chart yet</p>
+        <p className="label">No standings yet</p>
         <h1 className="mt-3 font-serif text-4xl">The playlist is not in.</h1>
         <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-muted">
           The admin has not imported a playlist yet, so there is nothing to
@@ -158,9 +158,9 @@ export function ChartPage() {
     return (
       <>
         <div className="border-b border-line pb-4">
-          <p className="label">Shared chart</p>
+          <p className="label">Public</p>
           <h1 className="mt-2 font-serif text-4xl leading-none sm:text-5xl">
-            The chart is sealed.
+            The Standings are sealed.
           </h1>
           <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
             {status.playlist_name} · {formatNumber(status.votes_cast)} picks ·{' '}
@@ -171,16 +171,16 @@ export function ChartPage() {
         <section className="panel mt-6 p-6 text-center sm:p-10">
           <p className="label">Not revealed</p>
           <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-muted">
-            The admin has not revealed the shared Elo ranking yet. Voting stays
-            open — the list is being built in private.
+            The admin has not opened The Reveal yet. Picking stays open — the
+            standings are being built in private.
           </p>
           <div className="mt-6 flex flex-wrap justify-center gap-3">
-            <Link to={user ? '/vote' : '/#auth'} className="btn">
-              {user ? 'Keep voting' : 'Sign in to vote'}
+            <Link to={user ? '/duel' : '/#auth'} className="btn">
+              {user ? 'Next duel' : 'Sign in to pick'}
             </Link>
             {user && (
-              <Link to="/ranking" className="btn-ghost">
-                Your personal chart
+              <Link to="/your-ranking" className="btn-ghost">
+                Your Ranking
               </Link>
             )}
           </div>
@@ -196,14 +196,14 @@ export function ChartPage() {
     <>
       <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line pb-4">
         <div>
-          <p className="label">Shared chart</p>
-          <h1 className="mt-2 font-serif text-4xl leading-none sm:text-5xl">The chart.</h1>
+          <p className="label">Public</p>
+          <h1 className="mt-2 font-serif text-4xl leading-none sm:text-5xl">The Standings.</h1>
           <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
             {status.playlist_name} · {formatNumber(status.votes_cast)} picks ·{' '}
             {formatNumber(status.total_tracks)} songs
           </p>
           <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.14em] text-muted/70">
-            Live Elo ranking · updates as votes come in
+            Live standings · updates as picks come in
           </p>
         </div>
 
@@ -217,8 +217,8 @@ export function ChartPage() {
             {refreshing ? 'Refreshing…' : 'Refresh'}
           </button>
           {user && (
-            <Link to="/vote" className="btn">
-              Vote
+            <Link to="/duel" className="btn">
+              Duel
             </Link>
           )}
         </div>
@@ -231,7 +231,7 @@ export function ChartPage() {
           onChange={(event) => setQueryInput(event.target.value)}
           placeholder="Search songs, artists or albums…"
           className="field flex-1"
-          aria-label="Search the chart"
+          aria-label="Search the standings"
         />
         <button type="submit" className="btn shrink-0">
           Search
@@ -262,7 +262,7 @@ export function ChartPage() {
               <span>#</span>
               <span />
               <span>Song</span>
-              <span className="text-right">Wins · Picks · Elo</span>
+              <span className="text-right">Wins · Duels · Score</span>
             </div>
 
             <ol>
@@ -335,7 +335,7 @@ export function ChartPage() {
       ) : (
         <section className="panel mt-4 p-6 text-center">
           <p className="text-sm text-muted">
-            {query ? `No songs match “${query}”.` : 'The chart is empty.'}
+            {query ? `No songs match “${query}”.` : 'The standings are empty.'}
           </p>
         </section>
       )}

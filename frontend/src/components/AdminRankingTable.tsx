@@ -34,7 +34,7 @@ export function AdminRankingTable() {
           setData(null)
           setError(null)
         } else {
-          setError(caught instanceof ApiError ? caught.message : 'Could not load the ranking')
+          setError(caught instanceof ApiError ? caught.message : 'Could not load the standings')
         }
       })
       .finally(() => {
@@ -65,7 +65,7 @@ export function AdminRankingTable() {
     <section className="panel">
       <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line px-5 py-3">
         <div>
-          <h2 className="label">Ranking</h2>
+          <h2 className="label">Standings</h2>
           <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
             {data ? `${formatNumber(data.total)} songs` : 'Loading…'}
           </p>
@@ -76,9 +76,9 @@ export function AdminRankingTable() {
             type="search"
             value={queryInput}
             onChange={(event) => setQueryInput(event.target.value)}
-            placeholder="Search songs or artists"
+            placeholder="Search the standings"
             className="field w-52 py-1.5 text-xs"
-            aria-label="Search the ranking"
+            aria-label="Search the standings"
           />
           <button type="submit" className="btn-ghost">
             Search
@@ -112,8 +112,8 @@ export function AdminRankingTable() {
                   <tr className="border-b border-line font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
                     <th className="w-10 pb-2 font-medium">#</th>
                     <th className="pb-2 font-medium">Song</th>
-                    <th className="pb-2 text-right font-medium">Elo</th>
-                    <th className="pb-2 text-right font-medium">Picks</th>
+                    <th className="pb-2 text-right font-medium">Score</th>
+                    <th className="pb-2 text-right font-medium">Duels</th>
                     <th className="pb-2 text-right font-medium">Wins</th>
                   </tr>
                 </thead>

@@ -104,7 +104,8 @@ export function PreviewPlayer({
           setPlaying(false)
           onPlayStateChange(false)
         }}
-        onEnded={() => {
+        onEnded={(event) => {
+          event.currentTarget.currentTime = 0
           setPlaying(false)
           setPosition(0)
           onPlayStateChange(false)

@@ -22,7 +22,7 @@ export function AdminReveal() {
       })
       .catch((caught: unknown) => {
         if (active) {
-          setError(caught instanceof ApiError ? caught.message : 'Could not load the reveal status')
+          setError(caught instanceof ApiError ? caught.message : 'Could not load The Reveal status')
         }
       })
 
@@ -38,7 +38,7 @@ export function AdminReveal() {
     if (
       next &&
       !window.confirm(
-        'Reveal the shared chart to everyone? Voting stays open and you can hide it again.',
+        'Open The Reveal to everyone? Picking stays open and you can seal the standings again.',
       )
     ) {
       return
@@ -50,7 +50,7 @@ export function AdminReveal() {
     try {
       setStatus(await api.setReveal(next))
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'Could not change the reveal state')
+      setError(caught instanceof ApiError ? caught.message : 'Could not change The Reveal')
     } finally {
       setBusy(false)
     }
@@ -59,7 +59,7 @@ export function AdminReveal() {
   return (
     <section className="panel">
       <div className="flex items-center justify-between border-b border-line px-5 py-3">
-        <h2 className="label">Reveal</h2>
+        <h2 className="label">The Reveal</h2>
         <span
           className={`border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.14em] ${
             status?.revealed
@@ -73,8 +73,8 @@ export function AdminReveal() {
 
       <div className="p-5">
         <p className="text-sm leading-relaxed text-muted">
-          The shared Elo chart stays hidden from voters until you reveal it.
-          Voting continues afterwards, and you can hide it again.
+          The shared standings stay hidden from voters until The Reveal.
+          Picking continues afterwards, and you can seal them again.
         </p>
 
         {status && (
@@ -97,7 +97,7 @@ export function AdminReveal() {
             disabled={busy || !status}
             className="btn"
           >
-            {busy ? 'Working…' : status?.revealed ? 'Hide chart' : 'Reveal chart'}
+            {busy ? 'Working…' : status?.revealed ? 'Seal the standings' : 'Open The Reveal'}
           </button>
           <a href="/api/admin/chart.csv" className="btn-ghost">
             Download CSV

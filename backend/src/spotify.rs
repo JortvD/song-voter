@@ -171,7 +171,7 @@ impl SpotifyClient {
             .get(&url)
             .header(
                 "user-agent",
-                "Mozilla/5.0 (compatible; ULLTop2000/0.1; +https://vote.jortvd.nl)",
+                "Mozilla/5.0 (compatible; PlaylistVoter/0.1; +https://vote.jortvd.nl)",
             )
             .send()
             .await

@@ -2,7 +2,7 @@
 //!
 //! Both tracks start at 1000. K decays from 40 towards a floor of 16 as the
 //! less-experienced track accumulates comparisons, so early votes move the
-//! chart and later votes settle it.
+//! standings and later picks settle it.
 
 /// Both tracks start here; this is also the database default.
 pub const INITIAL_RATING: f64 = 1000.0;

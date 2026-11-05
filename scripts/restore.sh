@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 if [ "$#" -ne 1 ]; then
-  echo "usage: $0 backups/ull-top-2000-YYYY-MM-DD-HHMMSS.sql.gz"
+  echo "usage: $0 backups/playlist-voter-YYYY-MM-DD-HHMMSS.sql.gz"
   exit 1
 fi
 

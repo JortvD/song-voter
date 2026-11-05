@@ -75,10 +75,10 @@ pub async fn next(
             tracing::debug!(
                 user_id = %user.0.id,
                 playlist_id = %playlist.id,
-                "no unseen matchup available"
+                "no unseen duel available"
             );
             return Err(ApiError::Conflict(
-                "you have compared every possible pair in this playlist".to_string(),
+                "you have seen every possible duel in this playlist".to_string(),
             ));
         };
 
@@ -99,7 +99,7 @@ pub async fn next(
                 attempt,
                 user_id = %user.0.id,
                 playlist_id = %playlist.id,
-                "matchup pair was recorded concurrently, retrying"
+                "duel pair was recorded concurrently, retrying"
             );
             continue;
         }
@@ -146,7 +146,7 @@ pub async fn next(
             votes_cast = progress.votes_cast,
             total_tracks,
             attempt,
-            "matchup served"
+            "duel served"
         );
 
         return Ok(Json(MatchupResponse {
@@ -164,10 +164,10 @@ pub async fn next(
     tracing::warn!(
         user_id = %user.0.id,
         playlist_id = %playlist.id,
-        "failed to lock in a fresh matchup after retries"
+        "failed to start a fresh duel after retries"
     );
     Err(ApiError::conflict(
-        "could not lock in a fresh matchup; please try again",
+        "could not start a fresh duel; please try again",
     ))
 }
 

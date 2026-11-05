@@ -15,8 +15,8 @@ export function RequireAuth({ children }: { children: ReactNode }) {
         <p className="label">Membership required</p>
         <h1 className="mt-3 font-serif text-3xl leading-tight">Sign in to continue.</h1>
         <p className="mt-3 text-sm leading-relaxed text-muted">
-          Voting is invite-only. Ask the admin for a code, then sign in from the
-          home page.
+          Picking is invite-only. Ask the admin for a code, then sign in from
+          the home page.
         </p>
         <a href="/#auth" className="btn mt-5 inline-flex">
           Go to sign in

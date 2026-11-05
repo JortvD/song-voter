@@ -101,7 +101,7 @@ function MatchupCard({
           disabled={disabled}
           className={`btn mt-2.5 w-full ${picked ? 'border-accent bg-accent' : ''}`}
         >
-          {picked ? 'Picked' : 'Pick this one'}
+          {picked ? 'Picked' : `Pick ${side.toUpperCase()}`}
         </button>
       </div>
     </article>
@@ -131,8 +131,8 @@ function ShortcutLegend() {
       <LegendItem keys={['2']} label="pick B" />
       <LegendItem keys={['Z']} label="undo" />
       <span className="basis-full font-mono text-[8px] uppercase tracking-[0.12em] text-muted/60">
-        Space starts with track A, then alternates. Shortcuts work while this page
-        has focus.
+        Space starts with track A, then alternates and resumes each side where it
+        left off. New duels reset both previews.
       </span>
     </div>
   )
@@ -200,7 +200,7 @@ function VoteScreen() {
         setExhausted(true)
         setMatchup(null)
       } else {
-        setError(caught instanceof ApiError ? caught.message : 'Could not load a matchup')
+        setError(caught instanceof ApiError ? caught.message : 'Could not load a duel')
         setMatchup(null)
       }
     } finally {
@@ -257,12 +257,12 @@ function VoteScreen() {
             setExhausted(true)
             setMatchup(null)
           } else {
-            setError(caught instanceof ApiError ? caught.message : 'Could not load the next matchup')
+            setError(caught instanceof ApiError ? caught.message : 'Could not load the next duel')
             setMatchup(null)
           }
         }
       } catch (caught) {
-        setError(caught instanceof ApiError ? caught.message : 'Vote failed')
+        setError(caught instanceof ApiError ? caught.message : 'Pick failed')
       } finally {
         setVoting(false)
         setPickedId(null)
@@ -287,7 +287,7 @@ function VoteScreen() {
       setExhausted(false)
       setMatchup({
         playlist_id: undone.playlist_id,
-        playlist_name: playlistName || 'The chart',
+        playlist_name: playlistName || 'Playlist Voter',
         track_a: undone.track_a,
         track_b: undone.track_b,
         compared_pairs: undone.compared_pairs,
@@ -319,12 +319,6 @@ function VoteScreen() {
 
     const other = side === 'a' ? audioB.current : audioA.current
     other?.pause()
-
-    try {
-      target.currentTime = 0
-    } catch {
-      // The preview may still be loading.
-    }
 
     void target
       .play()
@@ -378,19 +372,19 @@ function VoteScreen() {
     <>
       <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line pb-2.5">
         <div>
-          <p className="label">Matchup</p>
+          <p className="label">Duel</p>
           <h1 className="mt-1 font-serif text-2xl leading-tight sm:text-3xl">
-            {playlistName || 'The chart'}
+            {playlistName || 'Playlist Voter'}
           </h1>
           <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
-            {formatNumber(comparedPairs)} matchups · {formatNumber(votesCast)} picks ·{' '}
+            {formatNumber(comparedPairs)} duels · {formatNumber(votesCast)} picks ·{' '}
             {formatNumber(sessionPicks)} this session
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          <Link to="/ranking" className="btn-ghost">
-            Your chart
+          <Link to="/your-ranking" className="btn-ghost">
+            Your Ranking
           </Link>
           <button
             type="button"
@@ -439,15 +433,15 @@ function VoteScreen() {
           </div>
         ) : exhausted ? (
           <section className="panel p-6 text-center sm:p-8">
-            <p className="label">Chart complete</p>
+            <p className="label">All duels done</p>
             <h2 className="mt-2 font-serif text-3xl">You&apos;ve seen every pair.</h2>
             <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted">
-              Your chart has {formatNumber(votesCast)} picks. The shared ranking
-              stays sealed until the reveal.
+              Your ranking has {formatNumber(votesCast)} picks. The standings stay
+              sealed until The Reveal.
             </p>
             <div className="mt-5 flex flex-wrap justify-center gap-3">
-              <Link to="/ranking" className="btn">
-                Open your chart
+              <Link to="/your-ranking" className="btn">
+                Open your ranking
               </Link>
               <button
                 type="button"
@@ -492,7 +486,7 @@ function VoteScreen() {
         ) : (
           <section className="panel p-6 text-center sm:p-8">
             <p className="label">Not ready</p>
-            <h2 className="mt-2 font-serif text-3xl">No matchup loaded.</h2>
+            <h2 className="mt-2 font-serif text-3xl">No duel loaded.</h2>
             <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted">
               {error ?? 'The admin may not have imported a playlist yet.'}
             </p>

@@ -47,7 +47,7 @@ async fn main() -> anyhow::Result<()> {
         version = env!("CARGO_PKG_VERSION"),
         environment = %config.environment,
         frontend_dir = %config.frontend_dir,
-        "starting ULL Top 2000 backend"
+        "starting Playlist Voter backend"
     );
 
     if config.jwt_secret_was_generated {

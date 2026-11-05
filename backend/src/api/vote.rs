@@ -66,7 +66,7 @@ struct UndoableVote {
     created_at: DateTime<Utc>,
 }
 
-/// Record a vote on a matchup that was previously served to this user.
+/// Record a pick on a duel that was previously served to this user.
 pub async fn cast(
     State(state): State<AppState>,
     user: AuthUser,
@@ -74,7 +74,7 @@ pub async fn cast(
 ) -> Result<Json<VoteResponse>, ApiError> {
     if payload.track_a == payload.track_b {
         return Err(ApiError::bad_request(
-            "a matchup needs two different tracks",
+            "a duel needs two different tracks",
         ));
     }
     if payload.winner != payload.track_a && payload.winner != payload.track_b {
@@ -112,10 +112,10 @@ pub async fn cast(
             user_id = %user.0.id,
             track_low = %low_id,
             track_high = %high_id,
-            "vote rejected: matchup was not served or playlist is not active"
+            "pick rejected: duel was not served or playlist is not active"
         );
         return Err(ApiError::conflict(
-            "this matchup was not served to you, or the playlist changed",
+            "this duel was not served to you, or the playlist changed",
         ));
     };
 
@@ -140,9 +140,9 @@ pub async fn cast(
             user_id = %user.0.id,
             track_low = %low_id,
             track_high = %high_id,
-            "vote rejected: pair already voted on"
+            "pick rejected: duel already decided"
         );
-        return Err(ApiError::conflict("you already voted on this pair"));
+        return Err(ApiError::conflict("you already picked a side in this duel"));
     }
 
     let low_won = payload.winner == low_id;
@@ -268,7 +268,7 @@ pub async fn undo(
 
     let Some(vote) = vote else {
         transaction.rollback().await.ok();
-        return Err(ApiError::NotFound("you have no vote to undo".to_string()));
+        return Err(ApiError::NotFound("you have no pick to undo".to_string()));
     };
 
     // Lock both tracks before changing them, in the same order as voting.
@@ -370,6 +370,6 @@ async fn lock_track(
     .await?;
 
     track.ok_or_else(|| {
-        ApiError::conflict("a track in this matchup is no longer in the active playlist")
+        ApiError::conflict("a track in this duel is no longer in the active playlist")
     })
 }

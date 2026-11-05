@@ -22,7 +22,7 @@ export function AdminDangerZone({ onReset, onRemove }: Props) {
     if (resetConfirm !== 'RESET' || busy) return
 
     const confirmed = window.confirm(
-      'Delete every vote, matchup history and Elo rating for the active playlist? This cannot be undone.',
+      'Delete every pick, duel history and score for the active playlist? This cannot be undone.',
     )
     if (!confirmed) return
 
@@ -33,7 +33,7 @@ export function AdminDangerZone({ onReset, onRemove }: Props) {
     try {
       const result = await api.resetVotes(resetConfirm)
       setNotice(
-        `Reset complete — ${formatNumber(result.deleted_votes)} votes and ${formatNumber(result.deleted_matchups)} matchups removed.`,
+        `Reset complete — ${formatNumber(result.deleted_votes)} picks and ${formatNumber(result.deleted_matchups)} duels removed.`,
       )
       setResetConfirm('')
       onReset()
@@ -48,7 +48,7 @@ export function AdminDangerZone({ onReset, onRemove }: Props) {
     if (removeConfirm !== 'REMOVE' || busy) return
 
     const confirmed = window.confirm(
-      'Remove the current playlist, including all its tracks, votes, matchups and ratings? Users, invites and the Spotify connection are kept.',
+      'Remove the current playlist, including all its tracks, picks, duels and scores? Voters, invites and the Spotify connection are kept.',
     )
     if (!confirmed) return
 
@@ -59,7 +59,7 @@ export function AdminDangerZone({ onReset, onRemove }: Props) {
     try {
       const result = await api.removePlaylist(removeConfirm)
       setNotice(
-        `Playlist removed — ${formatNumber(result.removed_tracks)} tracks and ${formatNumber(result.removed_votes)} votes deleted.`,
+        `Playlist removed — ${formatNumber(result.removed_tracks)} tracks and ${formatNumber(result.removed_votes)} picks deleted.`,
       )
       setRemoveConfirm('')
       onRemove()
@@ -83,10 +83,10 @@ export function AdminDangerZone({ onReset, onRemove }: Props) {
 
       <div className="grid gap-4 p-5 sm:grid-cols-2">
         <div className="border border-line bg-card p-4">
-          <p className="label">Votes &amp; rankings</p>
+          <p className="label">Picks &amp; rankings</p>
           <p className="mt-2 text-sm leading-relaxed text-muted">
-            Delete all votes, matchups and Elo ratings for the active playlist,
-            and hide the shared chart. Users and invites are kept.
+            Delete all picks, duels and scores for the active playlist, and seal
+            the standings. Voters and invites are kept.
           </p>
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
             <input
@@ -95,7 +95,7 @@ export function AdminDangerZone({ onReset, onRemove }: Props) {
               onChange={(event) => setResetConfirm(event.target.value.toUpperCase())}
               placeholder="Type RESET"
               className="field max-w-40 font-mono text-xs tracking-[0.18em]"
-              aria-label="Type RESET to confirm resetting votes"
+              aria-label="Type RESET to confirm resetting picks"
             />
             <button
               type="button"
@@ -103,7 +103,7 @@ export function AdminDangerZone({ onReset, onRemove }: Props) {
               disabled={resetConfirm !== 'RESET' || busy !== null}
               className="btn border-accent bg-accent hover:bg-accent/80"
             >
-              {busy === 'reset' ? 'Resetting…' : 'Reset all votes'}
+              {busy === 'reset' ? 'Resetting…' : 'Reset all picks'}
             </button>
           </div>
         </div>
@@ -112,7 +112,7 @@ export function AdminDangerZone({ onReset, onRemove }: Props) {
           <p className="label">Playlist</p>
           <p className="mt-2 text-sm leading-relaxed text-muted">
             Remove the current playlist and return to the empty state. Its
-            tracks, votes, matchups and ratings are deleted. Users, invites and
+            tracks, picks, duels and scores are deleted. Voters, invites and
             the Spotify connection are kept.
           </p>
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">

@@ -16,7 +16,7 @@ use crate::error::ApiError;
 use crate::models::User;
 use crate::state::AppState;
 
-pub const SESSION_COOKIE: &str = "ull_session";
+pub const SESSION_COOKIE: &str = "pv_session";
 
 /// JWT signing/verification plus session-cookie construction.
 #[derive(Clone)]

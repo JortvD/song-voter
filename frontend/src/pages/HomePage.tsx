@@ -28,7 +28,7 @@ function HowItWorks() {
     },
     {
       title: 'Watch it settle',
-      body: 'Your personal chart updates after every pick. The shared one stays sealed until the reveal.',
+      body: 'Your Ranking updates after every pick. The Standings stay sealed until The Reveal.',
     },
   ]
 
@@ -66,7 +66,7 @@ function WelcomePanel({ user }: { user: User }) {
       <div className="flex items-center justify-between border-b border-line px-5 py-3">
         <h2 className="label">Signed in</h2>
         <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted">
-          Voting is open
+          Picking is open
         </span>
       </div>
       <div className="p-5 sm:p-6">
@@ -77,18 +77,18 @@ function WelcomePanel({ user }: { user: User }) {
         </h2>
         <p className="mt-4 max-w-md text-sm leading-relaxed text-muted">
           Pick between two songs, over and over. Press Space to play and switch,
-          pick with 1 and 2. Your personal chart updates after every pick — the
-          shared ranking stays sealed until the reveal.
+          pick with 1 and 2. Your Ranking updates after every pick — The
+          Standings stay sealed until The Reveal.
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
-          <Link to="/vote" className="btn">
-            Start voting
+          <Link to="/duel" className="btn">
+            Start picking
           </Link>
-          <Link to="/ranking" className="btn-ghost">
-            Your chart
+          <Link to="/your-ranking" className="btn-ghost">
+            Your Ranking
           </Link>
-          <Link to="/chart" className="btn-ghost">
-            Shared chart
+          <Link to="/standings" className="btn-ghost">
+            Standings
           </Link>
         </div>
       </div>
@@ -115,20 +115,20 @@ function AccountCard({ user }: { user: User }) {
           Member since {formatDate(user.created_at)}
         </p>
         <div className="mt-5 border-t border-line pt-4">
-          <p className="label">Your chart</p>
+          <p className="label">Your Ranking</p>
           <p className="mt-1.5 text-sm leading-relaxed text-muted">
-            Every pick builds your own Elo ranking. The shared chart stays
-            hidden until the admin reveals it.
+            Every pick builds your own score. The Standings stay sealed until The
+            Reveal.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
-            <Link to="/vote" className="btn">
-              Vote
+            <Link to="/duel" className="btn">
+              Duel
             </Link>
-            <Link to="/ranking" className="btn-ghost">
-              Open chart
+            <Link to="/your-ranking" className="btn-ghost">
+              Open Ranking
             </Link>
-            <Link to="/chart" className="btn-ghost">
-              Shared chart
+            <Link to="/standings" className="btn-ghost">
+              Standings
             </Link>
             {user.is_admin && (
               <Link to="/admin" className="btn-ghost">
@@ -162,7 +162,7 @@ export function HomePage() {
           <div className="max-w-2xl">
             <p className="label flex items-center gap-2">
               <span className="size-1.5 bg-accent" />
-              A collaborative chart
+              The people&apos;s playlist
             </p>
             <h1 className="mt-6 font-serif text-6xl leading-[0.92] tracking-[-0.02em] sm:text-7xl lg:text-8xl">
               Two songs.
@@ -170,8 +170,8 @@ export function HomePage() {
               One pick.<span className="text-accent">*</span>
             </h1>
             <p className="mt-6 max-w-md text-[15px] leading-relaxed text-muted">
-              A playlist becomes a chart. Compare tracks head to head, and every
-              answer nudges a shared Elo score.
+              A playlist becomes a contest. Two tracks enter a duel, and every
+              pick nudges the shared standings.
             </p>
             <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.18em] text-muted/70">
               * repeated a thousand times, by everyone.
@@ -180,23 +180,23 @@ export function HomePage() {
             <div className="mt-7 flex flex-wrap items-center gap-3">
               {user ? (
                 <>
-                  <Link to="/vote" className="btn">
-                    Start voting
+                  <Link to="/duel" className="btn">
+                    Start picking
                   </Link>
-                  <Link to="/ranking" className="btn-ghost">
-                    Your chart
+                  <Link to="/your-ranking" className="btn-ghost">
+                    Your Ranking
                   </Link>
-                  <Link to="/chart" className="btn-ghost">
-                    Shared chart
+                  <Link to="/standings" className="btn-ghost">
+                    Standings
                   </Link>
                 </>
               ) : (
                 <>
                   <a href="#auth" className="btn">
-                    Sign in to vote
+                    Sign in to pick
                   </a>
-                  <Link to="/chart" className="btn-ghost">
-                    See the chart
+                  <Link to="/standings" className="btn-ghost">
+                    See the standings
                   </Link>
                 </>
               )}

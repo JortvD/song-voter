@@ -56,7 +56,7 @@ pub struct Track {
 }
 
 /// Public view of a track: no rating, comparisons or wins, so the ranking
-/// cannot be inferred from matchup responses.
+/// cannot be inferred from duel responses.
 #[derive(Debug, Clone, FromRow, Serialize)]
 pub struct MatchupTrack {
     pub id: Uuid,

@@ -29,7 +29,7 @@ function RankingScreen() {
       })
       .catch((caught: unknown) => {
         if (active) {
-          setError(caught instanceof ApiError ? caught.message : 'Could not load your chart')
+          setError(caught instanceof ApiError ? caught.message : 'Could not load your ranking')
         }
       })
       .finally(() => {
@@ -48,23 +48,23 @@ function RankingScreen() {
     <>
       <div className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-4">
         <div>
-          <p className="label">Personal ranking</p>
-          <h1 className="mt-2 font-serif text-4xl leading-none sm:text-5xl">Your chart.</h1>
+          <p className="label">Personal</p>
+          <h1 className="mt-2 font-serif text-4xl leading-none sm:text-5xl">Your Ranking.</h1>
           <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
             {ranking
               ? `${ranking.playlist_name} · ${formatNumber(ranking.votes)} picks · ${formatNumber(ranking.total)} songs ranked`
               : 'Loading your picks…'}
           </p>
           <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.14em] text-muted/70">
-            Private to you · the shared chart stays sealed until the reveal
+            Private to you · The Standings stay sealed until The Reveal
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Link to="/chart" className="btn-ghost">
-            Shared chart
+          <Link to="/standings" className="btn-ghost">
+            Standings
           </Link>
-          <Link to="/vote" className="btn">
-            Keep voting
+          <Link to="/duel" className="btn">
+            Next duel
           </Link>
         </div>
       </div>
@@ -84,13 +84,13 @@ function RankingScreen() {
       ) : ranking && ranking.total === 0 ? (
         <section className="panel mt-6 p-6 text-center sm:p-10">
           <p className="label">No picks yet</p>
-          <h2 className="mt-3 font-serif text-3xl">Your chart starts with one pick.</h2>
+          <h2 className="mt-3 font-serif text-3xl">Your Ranking starts with one pick.</h2>
           <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-muted">
-            Vote on a few matchups and the songs you have heard will be ranked
+            Pick a few duels and the songs you have heard will be ranked
             here from your own answers.
           </p>
-          <Link to="/vote" className="btn mt-6 inline-flex">
-            Start voting
+          <Link to="/duel" className="btn mt-6 inline-flex">
+            Start picking
           </Link>
         </section>
       ) : ranking ? (
@@ -100,7 +100,7 @@ function RankingScreen() {
               <span>#</span>
               <span />
               <span>Song</span>
-              <span className="text-right">Wins · Picks · Elo</span>
+              <span className="text-right">Wins · Duels · Score</span>
             </div>
 
             <ol>
@@ -139,7 +139,7 @@ function RankingScreen() {
                       <span className="text-ink">{entry.wins}</span> W
                     </span>
                     <span className="hidden sm:inline">
-                      <span className="text-ink">{entry.comparisons}</span> P
+                      <span className="text-ink">{entry.comparisons}</span> D
                     </span>
                     <span className="text-ink">{Math.round(entry.rating)}</span>
                   </div>
@@ -171,7 +171,7 @@ function RankingScreen() {
           </div>
 
           <p className="mt-4 text-center font-mono text-[9px] uppercase tracking-[0.14em] text-muted/60">
-            W = wins · P = matchups · Elo = your personal rating
+            W = wins · D = duels · Score = your personal score
           </p>
         </>
       ) : null}

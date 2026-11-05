@@ -2,7 +2,7 @@
 name = "ull-top2000-backend"
 version = "0.1.0"
 edition = "2021"
-description = "Backend for the ULL Top 2000 collaborative ranking app"
+description = "Backend for Playlist Voter, a collaborative ranking app"
 
 [dependencies]
 anyhow = "1"
