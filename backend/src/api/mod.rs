@@ -5,6 +5,7 @@ use crate::state::AppState;
 
 pub mod admin;
 pub mod auth;
+pub mod balanced;
 pub mod chart;
 pub mod dashboard;
 pub mod matchup;
@@ -22,11 +23,17 @@ pub fn router() -> Router<AppState> {
         .route("/matchup", get(matchup::next))
         .route("/chart/status", get(chart::status))
         .route("/chart", get(chart::public))
+        .route("/chart/balanced", get(balanced::public))
         .route("/vote", post(vote::cast))
         .route("/vote/undo", post(vote::undo))
         .route("/me/ranking", get(ranking::personal))
         .route("/admin/reveal", post(chart::reveal))
         .route("/admin/chart.csv", get(chart::export_csv))
+        .route("/admin/balanced", get(balanced::admin_view))
+        .route(
+            "/admin/balanced/settings",
+            get(balanced::settings).put(balanced::update_settings),
+        )
         .route("/admin/stats", get(dashboard::stats))
         .route("/admin/users", get(dashboard::users))
         .route("/admin/ranking", get(dashboard::ranking))

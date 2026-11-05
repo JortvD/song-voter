@@ -4,9 +4,24 @@ import { Link } from 'react-router-dom'
 
 import { useAuth } from '../context/AuthContext'
 import { ApiError, api } from '../lib/api'
-import type { ChartStatus, PublicChart } from '../lib/types'
+import type { BalancedChart, ChartStatus, PublicChart } from '../lib/types'
 
 const PAGE_SIZE = 50
+
+type Mode = 'official' | 'balanced'
+
+type DisplayRow = {
+  id: string
+  rank: number | null
+  title: string
+  artists: string
+  albumImageUrl: string | null
+  score: number | null
+  comparisons: number
+  wins: number
+  voters: number | null
+  noData: boolean
+}
 
 function formatNumber(value: number) {
   return value.toLocaleString()
@@ -15,7 +30,9 @@ function formatNumber(value: number) {
 export function ChartPage() {
   const { user } = useAuth()
   const [status, setStatus] = useState<ChartStatus | null>(null)
+  const [mode, setMode] = useState<Mode>('official')
   const [chart, setChart] = useState<PublicChart | null>(null)
+  const [balanced, setBalanced] = useState<BalancedChart | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [offset, setOffset] = useState(0)
@@ -48,6 +65,7 @@ export function ChartPage() {
   useEffect(() => {
     if (!status?.revealed) {
       setChart(null)
+      setBalanced(null)
       return
     }
 
@@ -55,11 +73,16 @@ export function ChartPage() {
     setLoading(true)
     setError(null)
 
-    api
-      .getPublicChart(offset, PAGE_SIZE, query)
-      .then((data) => {
-        if (active) setChart(data)
-      })
+    const request =
+      mode === 'official'
+        ? api.getPublicChart(offset, PAGE_SIZE, query).then((data) => {
+            if (active) setChart(data)
+          })
+        : api.getBalancedChart(offset, PAGE_SIZE, query).then((data) => {
+            if (active) setBalanced(data)
+          })
+
+    request
       .catch((caught: unknown) => {
         if (!active) return
         if (caught instanceof ApiError && caught.status === 403) {
@@ -68,8 +91,15 @@ export function ChartPage() {
             previous ? { ...previous, revealed: false } : previous,
           )
           setChart(null)
+          setBalanced(null)
         } else {
-          setError(caught instanceof ApiError ? caught.message : 'Could not load the standings')
+          setError(
+            caught instanceof ApiError
+              ? caught.message
+              : mode === 'official'
+                ? 'Could not load the standings'
+                : 'Could not load the balanced standings',
+          )
         }
       })
       .finally(() => {
@@ -79,7 +109,7 @@ export function ChartPage() {
     return () => {
       active = false
     }
-  }, [status?.revealed, offset, query])
+  }, [status?.revealed, offset, query, mode])
 
   async function refresh() {
     setRefreshing(true)
@@ -89,10 +119,20 @@ export function ChartPage() {
       const next = await api.getChartStatus()
       setStatus(next)
       if (next.revealed) {
-        setChart(await api.getPublicChart(offset, PAGE_SIZE, query))
+        if (mode === 'official') {
+          setChart(await api.getPublicChart(offset, PAGE_SIZE, query))
+        } else {
+          setBalanced(await api.getBalancedChart(offset, PAGE_SIZE, query))
+        }
       }
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'Could not refresh the standings')
+      setError(
+        caught instanceof ApiError
+          ? caught.message
+          : mode === 'official'
+            ? 'Could not refresh the standings'
+            : 'Could not refresh the balanced standings',
+      )
     } finally {
       setRefreshing(false)
     }
@@ -108,6 +148,15 @@ export function ChartPage() {
     setQueryInput('')
     setQuery('')
     setOffset(0)
+  }
+
+  function selectMode(next: Mode) {
+    if (next === mode) return
+
+    setMode(next)
+    setOffset(0)
+    setError(null)
+    setLoading(true)
   }
 
   if (loading && !status) {
@@ -189,8 +238,36 @@ export function ChartPage() {
     )
   }
 
-  const first = chart && chart.total > 0 ? chart.offset + 1 : 0
-  const last = chart ? Math.min(chart.offset + chart.limit, chart.total) : 0
+  const active = mode === 'official' ? chart : balanced
+  const rows: DisplayRow[] =
+    mode === 'official'
+      ? (chart?.tracks ?? []).map((entry) => ({
+          id: entry.track.id,
+          rank: entry.rank,
+          title: entry.track.title,
+          artists: entry.track.artists,
+          albumImageUrl: entry.track.album_image_url,
+          score: entry.rating,
+          comparisons: entry.comparisons,
+          wins: entry.wins,
+          voters: null,
+          noData: false,
+        }))
+      : (balanced?.tracks ?? []).map((entry) => ({
+          id: entry.track.id,
+          rank: entry.rank,
+          title: entry.track.title,
+          artists: entry.track.artists,
+          albumImageUrl: entry.track.album_image_url,
+          score: entry.rating,
+          comparisons: entry.comparisons,
+          wins: entry.wins,
+          voters: entry.voters,
+          noData: entry.no_data,
+        }))
+
+  const first = active && active.total > 0 ? active.offset + 1 : 0
+  const last = active ? Math.min(active.offset + active.limit, active.total) : 0
 
   return (
     <>
@@ -224,6 +301,39 @@ export function ChartPage() {
         </div>
       </div>
 
+      <div className="mt-5 flex flex-wrap items-center gap-2 border-b border-line pb-3">
+        <button
+          type="button"
+          onClick={() => selectMode('official')}
+          className={mode === 'official' ? 'btn' : 'btn-ghost'}
+          aria-pressed={mode === 'official'}
+        >
+          Official
+        </button>
+        <button
+          type="button"
+          onClick={() => selectMode('balanced')}
+          className={mode === 'balanced' ? 'btn' : 'btn-ghost'}
+          aria-pressed={mode === 'balanced'}
+        >
+          Balanced
+        </button>
+        <span className="ml-auto font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
+          {mode === 'official'
+            ? 'Every pick counts once'
+            : 'Volume-adjusted · confidence-weighted'}
+        </span>
+      </div>
+
+      {mode === 'balanced' && (
+        <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+          Influence grows with the square root of each voter&apos;s pick count by
+          default, so heavy voters cannot run away with the list. Personal scores
+          are shrunk toward neutral until a voter has compared a song enough
+          times.
+        </p>
+      )}
+
       <form onSubmit={applySearch} className="mt-4 flex flex-col gap-2 sm:flex-row">
         <input
           type="search"
@@ -255,29 +365,33 @@ export function ChartPage() {
             <div key={index} className="h-14 animate-pulse border border-line bg-card" />
           ))}
         </div>
-      ) : chart && chart.tracks.length > 0 ? (
+      ) : rows.length > 0 ? (
         <>
           <div className="mt-4 border border-line bg-card">
             <div className="hidden grid-cols-[2.5rem_3rem_1fr_auto] gap-3 border-b border-line px-4 py-2.5 font-mono text-[9px] uppercase tracking-[0.14em] text-muted sm:grid">
               <span>#</span>
               <span />
               <span>Song</span>
-              <span className="text-right">Wins · Duels · Score</span>
+              <span className="text-right">
+                {mode === 'official'
+                  ? 'Wins · Duels · Score'
+                  : 'Wins · Duels · Voters · Score'}
+              </span>
             </div>
 
             <ol>
-              {chart.tracks.map((entry) => (
+              {rows.map((row) => (
                 <li
-                  key={entry.track.id}
+                  key={row.id}
                   className="grid grid-cols-[2.5rem_3rem_1fr] items-center gap-3 border-b border-line px-4 py-3 last:border-b-0 sm:grid-cols-[2.5rem_3rem_1fr_auto]"
                 >
                   <span className="font-serif text-xl leading-none text-muted">
-                    {String(entry.rank).padStart(2, '0')}
+                    {row.rank ? String(row.rank).padStart(2, '0') : '—'}
                   </span>
 
-                  {entry.track.album_image_url ? (
+                  {row.albumImageUrl ? (
                     <img
-                      src={entry.track.album_image_url}
+                      src={row.albumImageUrl}
                       alt=""
                       className="size-12 border border-line object-cover"
                     />
@@ -289,21 +403,30 @@ export function ChartPage() {
 
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium leading-tight">
-                      {entry.track.title}
+                      {row.title}
                     </p>
                     <p className="mt-0.5 truncate font-mono text-[9px] uppercase tracking-[0.12em] text-muted">
-                      {entry.track.artists}
+                      {row.artists}
                     </p>
                   </div>
 
-                  <div className="col-span-3 flex items-center justify-end gap-4 font-mono text-[10px] uppercase tracking-[0.1em] text-muted sm:col-span-1">
+                  <div className="col-span-3 flex flex-wrap items-center justify-end gap-3 font-mono text-[10px] uppercase tracking-[0.1em] text-muted sm:col-span-1 sm:gap-4">
                     <span>
-                      <span className="text-ink">{entry.wins}</span> W
+                      <span className="text-ink">{row.wins}</span> W
                     </span>
                     <span className="hidden sm:inline">
-                      <span className="text-ink">{entry.comparisons}</span> P
+                      <span className="text-ink">{row.comparisons}</span> D
                     </span>
-                    <span className="text-ink">{Math.round(entry.rating)}</span>
+                    {mode === 'balanced' && row.voters !== null && (
+                      <span className="hidden sm:inline">
+                        <span className="text-ink">{row.voters}</span> V
+                      </span>
+                    )}
+                    {row.noData || row.score === null ? (
+                      <span className="text-muted/70">No data</span>
+                    ) : (
+                      <span className="text-ink">{Math.round(row.score)}</span>
+                    )}
                   </div>
                 </li>
               ))}
@@ -320,12 +443,12 @@ export function ChartPage() {
               Previous
             </button>
             <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
-              {first}–{last} of {formatNumber(chart.total)}
+              {first}–{last} of {formatNumber(active?.total ?? 0)}
             </span>
             <button
               type="button"
               onClick={() => setOffset(offset + PAGE_SIZE)}
-              disabled={last >= chart.total}
+              disabled={!active || last >= active.total}
               className="btn-ghost"
             >
               Next
@@ -335,7 +458,11 @@ export function ChartPage() {
       ) : (
         <section className="panel mt-4 p-6 text-center">
           <p className="text-sm text-muted">
-            {query ? `No songs match “${query}”.` : 'The standings are empty.'}
+            {query
+              ? `No songs match “${query}”.`
+              : mode === 'balanced'
+                ? 'The playlist is empty.'
+                : 'The standings are empty.'}
           </p>
         </section>
       )}

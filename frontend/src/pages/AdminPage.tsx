@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { AdminDangerZone } from '../components/AdminDangerZone'
+import { AdminBalancedSettings } from '../components/AdminBalancedSettings'
 import { AdminInvites } from '../components/AdminInvites'
 import { AdminPlaylist } from '../components/AdminPlaylist'
 import { AdminRankingTable } from '../components/AdminRankingTable'
@@ -227,7 +228,12 @@ function Dashboard() {
       </div>
 
       <div className="mt-8">
-        <SectionHeading number="05" title="Operations" />
+        <SectionHeading number="05" title="Balanced" aside="Ranking settings" />
+        <AdminBalancedSettings key={`balanced-${refreshKey}`} />
+      </div>
+
+      <div className="mt-8">
+        <SectionHeading number="06" title="Operations" />
         <div className="grid items-start gap-6 lg:grid-cols-[1.3fr_0.7fr]">
           <div className="space-y-6">
             <AdminPlaylist key={`playlist-${refreshKey}`} />
@@ -238,7 +244,7 @@ function Dashboard() {
       </div>
 
       <div className="mt-8">
-        <SectionHeading number="06" title="Danger zone" />
+        <SectionHeading number="07" title="Danger zone" />
         <AdminDangerZone onReset={refresh} onRemove={refresh} />
       </div>
     </>

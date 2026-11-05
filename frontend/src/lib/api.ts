@@ -1,5 +1,7 @@
 import type {
   AdminUsersPage,
+  BalancedChart,
+  BalancedSettings,
   ChartStatus,
   DashboardStats,
   ImportSummary,
@@ -114,6 +116,10 @@ export const api = {
     request<PublicChart>(
       `/api/chart?limit=${limit}&offset=${offset}&q=${encodeURIComponent(query)}`,
     ),
+  getBalancedChart: (offset = 0, limit = 50, query = '') =>
+    request<BalancedChart>(
+      `/api/chart/balanced?limit=${limit}&offset=${offset}&q=${encodeURIComponent(query)}`,
+    ),
   setReveal: (revealed: boolean) =>
     request<ChartStatus>('/api/admin/reveal', {
       method: 'POST',
@@ -128,6 +134,22 @@ export const api = {
     request<PublicChart>(
       `/api/admin/ranking?limit=${limit}&offset=${offset}&q=${encodeURIComponent(query)}`,
     ),
+  getAdminBalanced: (offset = 0, limit = 50, query = '') =>
+    request<BalancedChart>(
+      `/api/admin/balanced?limit=${limit}&offset=${offset}&q=${encodeURIComponent(query)}`,
+    ),
+  getBalancedSettings: () =>
+    request<BalancedSettings>('/api/admin/balanced/settings'),
+  updateBalancedSettings: (input: {
+    influence_exponent: number
+    confidence_prior: number
+    neutral_prior: number
+    min_picks: number
+  }) =>
+    request<BalancedSettings>('/api/admin/balanced/settings', {
+      method: 'PUT',
+      body: input,
+    }),
   resetVotes: (confirm: string) =>
     request<{ reset: boolean; deleted_votes: number; deleted_matchups: number }>(
       '/api/admin/reset/votes',

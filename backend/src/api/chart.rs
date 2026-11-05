@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use axum::body::Body;
@@ -9,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::api::balanced::{compute_balanced, load_settings, BalancedEntry};
 use crate::auth::AdminUser;
 use crate::db::active_playlist;
 use crate::error::ApiError;
@@ -239,6 +241,13 @@ pub async fn export_csv(
         ));
     };
 
+    let settings = load_settings(&state.db).await?;
+    let balanced = compute_balanced(&state.db, &playlist, &settings).await?;
+    let balanced_by_id: HashMap<Uuid, &BalancedEntry> = balanced
+        .iter()
+        .map(|entry| (entry.track.id, entry))
+        .collect();
+
     let rows = sqlx::query_as::<_, ChartRow>(
         "SELECT id, spotify_id, title, artists, album, album_image_url, preview_url, \
                 duration_ms, rating, comparisons, wins \
@@ -250,13 +259,35 @@ pub async fn export_csv(
     .await?;
 
     let mut csv = String::from(
-        "rank,title,artists,album,spotify_id,rating,comparisons,wins\n",
+        "rank,title,artists,album,spotify_id,rating,comparisons,wins,\
+         balanced_rank,balanced_score,balanced_voters,balanced_weight,balanced_confidence\n",
     );
 
     for (index, row) in rows.iter().enumerate() {
+        let balanced_entry = balanced_by_id.get(&row.id);
+        let balanced_rank = balanced_entry
+            .and_then(|entry| entry.rank)
+            .map(|rank| rank.to_string())
+            .unwrap_or_default();
+        let balanced_score = balanced_entry
+            .and_then(|entry| entry.rating)
+            .map(|score| format!("{score:.2}"))
+            .unwrap_or_default();
+        let balanced_voters = balanced_entry.map(|entry| entry.voters).unwrap_or(0);
+        let balanced_weight = balanced_entry.map(|entry| entry.weight).unwrap_or(0.0);
+        let balanced_confidence = balanced_entry
+            .map(|entry| {
+                if entry.weight > 0.0 {
+                    entry.weight / (entry.weight + settings.neutral_prior.max(0.0))
+                } else {
+                    0.0
+                }
+            })
+            .unwrap_or(0.0);
+
         let _ = writeln!(
             &mut csv,
-            "{},{},{},{},{},{:.2},{},{}",
+            "{},{},{},{},{},{:.2},{},{},{},{},{},{:.3},{:.3}",
             index + 1,
             csv_field(&row.title),
             csv_field(&row.artists),
@@ -264,7 +295,12 @@ pub async fn export_csv(
             csv_field(&row.spotify_id),
             row.rating,
             row.comparisons,
-            row.wins
+            row.wins,
+            balanced_rank,
+            balanced_score,
+            balanced_voters,
+            balanced_weight,
+            balanced_confidence
         );
     }
 
@@ -272,7 +308,12 @@ pub async fn export_csv(
         admin_id = %admin.0.id,
         playlist_id = %playlist.id,
         rows = rows.len(),
-        "standings CSV exported"
+        balanced_rows = balanced.len(),
+        influence_exponent = settings.influence_exponent,
+        confidence_prior = settings.confidence_prior,
+        neutral_prior = settings.neutral_prior,
+        min_picks = settings.min_picks,
+        "standings CSV exported with balanced columns"
     );
 
     Response::builder()

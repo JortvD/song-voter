@@ -160,6 +160,36 @@ export type PublicChart = {
   tracks: ChartEntry[]
 }
 
+export type BalancedSettings = {
+  influence_exponent: number
+  confidence_prior: number
+  neutral_prior: number
+  min_picks: number
+  updated_at: string
+}
+
+export type BalancedEntry = {
+  rank: number | null
+  track: MatchupTrack
+  rating: number | null
+  comparisons: number
+  wins: number
+  voters: number
+  weight: number
+  no_data: boolean
+}
+
+export type BalancedChart = {
+  playlist_id: string
+  playlist_name: string
+  revealed: boolean
+  total: number
+  limit: number
+  offset: number
+  query: string
+  tracks: BalancedEntry[]
+}
+
 export type DailyVotes = {
   date: string
   votes: number
