@@ -14,7 +14,7 @@ scripts and accessibility/motion polish.
 - **Frontend** — React, TypeScript, Vite, Tailwind CSS
 - **Database** — PostgreSQL 16
 - **Packaging** — Docker Compose; the backend container serves the static frontend
-- **TLS** — terminated by the host nginx (`vote.jortvd.nl` → `127.0.0.1:8080`)
+- **TLS** — terminated by the host nginx (`vote.jortvd.nl` → `127.0.0.1:8765`)
 
 ## Quick start (Docker)
 
@@ -30,7 +30,7 @@ For playlist import, set `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` and
 then click **Connect** in the admin Playlist panel. Development Mode requires the
 app owner to have Spotify Premium.
 
-Then open <http://localhost:8080>. Sign in with the configured admin account,
+Then open <http://localhost:8765>. Sign in with the configured admin account,
 create an invite code in the "Invites" panel, and register a voter account.
 
 - `GET /healthz` — liveness, version and uptime (no DB access)
@@ -89,13 +89,13 @@ Example with curl:
 ```bash
 curl -c cookies.txt -H 'content-type: application/json' \
   -d '{"username":"admin","password":"change-me"}' \
-  http://localhost:8080/api/auth/login
+  http://localhost:8765/api/auth/login
 
-curl -b cookies.txt -X POST http://localhost:8080/api/admin/invites
+curl -b cookies.txt -X POST http://localhost:8765/api/admin/invites
 
 curl -b cookies.txt -H 'content-type: application/json' \
   -d '{"playlist":"https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"}' \
-  http://localhost:8080/api/admin/playlist/import
+  http://localhost:8765/api/admin/playlist/import
 ```
 
 ## Playlist import
@@ -252,10 +252,12 @@ snapshots, other users' votes on the same tracks remain intact.
   ```
   Restore with `./scripts/restore.sh backups/<file>.sql.gz`. Backups contain
   password hashes and Spotify tokens — keep them private.
-- **Nginx** — proxy all paths to the backend so the SPA routes work:
+- **Nginx** — use `deploy/nginx/vote.jortvd.nl.conf`. It listens on HTTP port
+  80 and proxies to the compose host port 8765; run `certbot --nginx` afterwards
+  and it will add HTTPS + the redirect. Proxy all paths so SPA routes work:
   ```nginx
   location / {
-      proxy_pass http://127.0.0.1:8080;
+      proxy_pass http://127.0.0.1:8765;
       proxy_set_header Host $host;
       proxy_set_header X-Real-IP $remote_addr;
       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -335,6 +337,8 @@ npm run dev        # http://localhost:5173, proxies /api, /healthz, /readyz to :
 ├── scripts/
 │   ├── backup.sh         # pg_dump into backups/
 │   └── restore.sh        # restore a dump
+├── deploy/
+│   └── nginx/            # certbot-ready HTTP vhost
 └── frontend/
     └── src/
         ├── components/   # header, system, auth, playlist, invites

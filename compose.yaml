@@ -44,7 +44,8 @@ services:
       SPOTIFY_REDIRECT_URI: ${SPOTIFY_REDIRECT_URI:-}
     ports:
       # Bound to localhost because the host nginx terminates TLS and proxies here.
-      - "127.0.0.1:${APP_PORT:-8080}:8080"
+      # Fixed production port; the old APP_PORT variable in .env is ignored.
+      - "127.0.0.1:8765:8080"
     healthcheck:
       test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8080'"]
       interval: 10s
