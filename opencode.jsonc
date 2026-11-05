@@ -1,0 +1,51 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // Baseline interactive model
+  "model": "opencode-go/deepseek-v4.1-flash",
+
+  // Aggressive context containment to protect the 5-hour limit
+  "compaction": {
+    "auto": true,
+    // Prune raw transcript after 12,000 tokens of turns to rely on checkpoints
+    "keep": {
+      "tokens": 12000
+    },
+    // Trigger compaction safely before reaching inference context ceilings
+    "buffer": 16000
+  },
+
+  // Stop background subagent recursion loops
+  "experimental": {
+    "subagent_depth": 1
+  },
+
+  "agents": {
+    // 1. Implementation Workhorse (High $80 allowance, precise code generation)
+    "build": {
+      "model": "opencode-go/deepseek-v4.1-flash"
+    },
+
+    // 2. High-IQ Planner (GLM-5.3-Flash has high reasoning at 1/10th the cost of 5.2)
+    "plan": {
+      "model": "opencode-go/glm-5.3-flash",
+      "permissions": [
+        { "action": "edit", "resource": "*", "effect": "deny" }
+      ]
+    },
+
+    // 3. File Indexer & Grep (Protects your budget during large codebase crawls)
+    "explore": {
+      "model": "opencode-go/mimo-v2.6-flash",
+      "permissions": [
+        { "action": "edit", "resource": "*", "effect": "deny" },
+        { "action": "shell", "resource": "*", "effect": "deny" }
+      ]
+    },
+
+    // 4. Maintenance / Session Titling (Uses cheapest flash engine)
+    "title": {
+      "model": "opencode-go/mimo-v2.6-flash"
+    }
+  }
+}
