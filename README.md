@@ -260,7 +260,9 @@ snapshots, other voters' picks on the same tracks remain intact.
   from **Settings**.
 - The space above the cassette shows **Recent duels**: a compact, picked-only
   history with both album covers and the winner checked. It fills the available
-  space and fades out when more duels exist.
+  space and fades out when more duels exist. On phones its height is calculated
+  from the free space and then fixed, so scrolling or collapsing browser chrome
+  cannot resize the panel.
 - `/your-duels` is the full duel history for the active playlist. It includes
   duels you skipped, supports **All / Picked / No pick** filters, lets you tap a
   cover to preview the 30-second Spotify clip, and pages through the archive.

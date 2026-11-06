@@ -5,7 +5,7 @@ import type { DuelHistoryItem, MatchupTrack } from '../../lib/types'
 type RecentDuelsProps = {
   duels: DuelHistoryItem[]
   className?: string
-  maxHeight?: number | null
+  height?: number | null
 }
 
 function RecentSide({ track, won }: { track: MatchupTrack; won: boolean }) {
@@ -35,12 +35,12 @@ function RecentSide({ track, won }: { track: MatchupTrack; won: boolean }) {
 export function RecentDuels({
   duels,
   className = '',
-  maxHeight,
+  height,
 }: RecentDuelsProps) {
   return (
     <section
       className={`pv-recent ${className}`}
-      style={maxHeight != null ? { maxHeight: `${maxHeight}px` } : undefined}
+      style={height != null ? { height: `${height}px` } : undefined}
       aria-label="Recent duels"
     >
       <div className="pv-recent-head">

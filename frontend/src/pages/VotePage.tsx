@@ -46,6 +46,20 @@ function sleep(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }
 
+function smallViewportHeight() {
+  if (typeof CSS === 'undefined' || !CSS.supports('height', '100svh')) {
+    return window.innerHeight
+  }
+
+  const probe = document.createElement('div')
+  probe.style.cssText =
+    'position:fixed;top:0;left:0;width:0;height:100svh;visibility:hidden;pointer-events:none'
+  document.body.appendChild(probe)
+  const height = probe.getBoundingClientRect().height
+  probe.remove()
+  return height
+}
+
 function vibrate() {
   const nav = navigator as Navigator & {
     vibrate?: (pattern: number | number[]) => boolean
@@ -98,7 +112,7 @@ function VoteScreen() {
   const [playlistName, setPlaylistName] = useState('')
   const [playingSide, setPlayingSide] = useState<'a' | 'b' | null>(null)
   const [recentDuels, setRecentDuels] = useState<DuelHistoryItem[]>([])
-  const [recentMaxHeight, setRecentMaxHeight] = useState<number | null>(null)
+  const [recentHeight, setRecentHeight] = useState<number | null>(null)
   const [autoPreview, setAutoPreview] = useState(initialAutoPreview)
   const [autoDockVisible, setAutoDockVisible] = useState(false)
 
@@ -158,7 +172,7 @@ function VoteScreen() {
       window.removeEventListener('scroll', schedule)
       window.removeEventListener('resize', schedule)
     }
-  }, [matchup, recentMaxHeight, recentDuels.length, votesCast])
+  }, [matchup, recentHeight, recentDuels.length, votesCast])
 
   const cancelFade = useCallback((side: 'a' | 'b') => {
     const frame = fadeFrames.current[side]
@@ -312,7 +326,7 @@ function VoteScreen() {
 
   useLayoutEffect(() => {
     if (!matchup) {
-      setRecentMaxHeight(null)
+      setRecentHeight(null)
       return
     }
 
@@ -321,7 +335,7 @@ function VoteScreen() {
     const measure = () => {
       if (cancelled) return
       if (window.innerWidth >= 1024) {
-        setRecentMaxHeight(null)
+        setRecentHeight(null)
         return
       }
 
@@ -330,15 +344,18 @@ function VoteScreen() {
       if (!stage || !card) return
 
       const tabs = document.querySelector<HTMLElement>('nav[aria-label="Primary"]')
+      const viewportHeight = smallViewportHeight()
       const bottom = tabs
-        ? tabs.getBoundingClientRect().top
-        : window.innerHeight - 64
+        ? viewportHeight - tabs.offsetHeight
+        : viewportHeight - 64
+      // Measure in document space and use the small viewport height so
+      // scrolling or collapsing mobile browser chrome cannot grow the panel.
+      const stageTop = stage.getBoundingClientRect().top + window.scrollY
       // On phones the auto-preview dock is absolute and hidden until scroll,
       // so the card height is just the cassette and recent duels gets the rest.
-      const available =
-        bottom - stage.getBoundingClientRect().top - card.offsetHeight - 12 - 8
+      const available = bottom - stageTop - card.offsetHeight - 12 - 8
 
-      setRecentMaxHeight(Math.min(Math.max(Math.floor(available), 0), 190))
+      setRecentHeight(Math.min(Math.max(Math.floor(available), 0), 190))
     }
     measure()
     const observer =
@@ -761,8 +778,10 @@ function VoteScreen() {
 
               <RecentDuels
                 duels={recentDuels}
-                maxHeight={recentMaxHeight}
-                className="mx-auto min-h-0 w-full max-w-5xl flex-1"
+                height={recentHeight}
+                className={`mx-auto min-h-0 w-full max-w-5xl ${
+                  recentHeight == null ? 'flex-1' : 'shrink-0'
+                }`}
               />
 
               <div
