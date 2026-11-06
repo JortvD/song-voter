@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { Countdown } from '../components/Countdown'
 import { MixtapeCase } from '../components/MixtapeCase'
+import { TrackDetailPanel } from '../components/TrackDetailPanel'
 import { TrackFilters } from '../components/TrackFilters'
 import { useAuth } from '../context/AuthContext'
 import { usePlaylist } from '../context/PlaylistContext'
@@ -312,6 +313,9 @@ export function ChartPage() {
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
   const [showReveal, setShowReveal] = useState(false)
+  const [expandedTracks, setExpandedTracks] = useState<Set<string>>(
+    () => new Set(),
+  )
   const [searchInput, setSearchInput] = useState('')
   const [query, setQuery] = useState('')
   const [artistId, setArtistId] = useState<string | null>(null)
@@ -349,6 +353,15 @@ export function ChartPage() {
     setArtistId(null)
     setDecade(null)
     setGenre(null)
+  }, [])
+
+  const toggleTrack = useCallback((id: string) => {
+    setExpandedTracks((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }, [])
 
   useEffect(() => {
@@ -732,39 +745,58 @@ export function ChartPage() {
               </div>
 
               <ol>
-                {rows.map((row) => (
-                  <li
-                    key={row.id}
-                    className="pv-list-row grid grid-cols-[2.5rem_2.5rem_1fr] items-center gap-3 border-b border-line px-3 py-3 last:border-b-0 sm:grid-cols-[2.5rem_2.5rem_1fr_auto]"
-                  >
-                    <span className="font-serif text-xl leading-none text-muted">
-                      {String(row.rank).padStart(2, '0')}
-                    </span>
+                {rows.map((row) => {
+                  const expanded = expandedTracks.has(row.id)
 
-                    <Cover image={row.image} title={row.title} />
+                  return (
+                    <li
+                      key={row.id}
+                      className="border-b border-line last:border-b-0"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleTrack(row.id)}
+                        aria-expanded={expanded}
+                        aria-label={`${expanded ? 'Hide' : 'Show'} stats for ${row.title} by ${row.artists}`}
+                        className="pv-list-row grid w-full grid-cols-[2.5rem_2.5rem_1fr] items-center gap-3 px-3 py-3 text-left transition hover:bg-paper sm:grid-cols-[2.5rem_2.5rem_1fr_auto]"
+                      >
+                        <span className="font-serif text-xl leading-none text-muted">
+                          {String(row.rank).padStart(2, '0')}
+                        </span>
 
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium leading-tight">
-                        {row.title}
-                      </p>
-                      <p className="mt-0.5 truncate font-mono text-[9px] uppercase tracking-[0.12em] text-muted">
-                        {row.artists}
-                      </p>
-                    </div>
+                        <Cover image={row.image} title={row.title} />
 
-                    <div className="col-span-3 flex flex-wrap items-center justify-end gap-3 font-mono text-[9px] uppercase tracking-[0.1em] text-muted sm:col-span-1 sm:gap-4">
-                      <span>
-                        <span className="text-ink">{row.wins}</span> W
-                      </span>
-                      <span className="hidden sm:inline">
-                        <span className="text-ink">{row.comparisons}</span> D
-                      </span>
-                      <span className="font-serif text-lg leading-none text-ink">
-                        {Math.round(row.score)}
-                      </span>
-                    </div>
-                  </li>
-                ))}
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium leading-tight">
+                            {row.title}
+                          </p>
+                          <p className="mt-0.5 truncate font-mono text-[9px] uppercase tracking-[0.12em] text-muted">
+                            {row.artists}
+                          </p>
+                        </div>
+
+                        <div className="col-span-3 flex flex-wrap items-center justify-end gap-3 font-mono text-[9px] uppercase tracking-[0.1em] text-muted sm:col-span-1 sm:gap-4">
+                          <span>
+                            <span className="text-ink">{row.wins}</span> W
+                          </span>
+                          <span className="hidden sm:inline">
+                            <span className="text-ink">{row.comparisons}</span> D
+                          </span>
+                          <span className="font-serif text-lg leading-none text-ink">
+                            {Math.round(row.score)}
+                          </span>
+                        </div>
+                      </button>
+
+                      {expanded && (
+                        <TrackDetailPanel
+                          trackId={row.id}
+                          preferredScope="official"
+                        />
+                      )}
+                    </li>
+                  )
+                })}
               </ol>
             </div>
 

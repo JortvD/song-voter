@@ -382,6 +382,40 @@ async fn user_tracks_and_votes(
     Ok((by_id, votes))
 }
 
+pub(crate) struct PersonalTrackSnapshot {
+    pub rank: Option<usize>,
+    pub total_ranked: usize,
+    pub rating: Option<f64>,
+}
+
+/// Replay this voter's picks and pluck one track out of the personal chart.
+/// Used by the song detail dialog so its numbers always match Your Ranking.
+pub(crate) async fn personal_track_snapshot(
+    pool: &PgPool,
+    user_id: Uuid,
+    playlist_id: Uuid,
+    track_id: Uuid,
+) -> Result<PersonalTrackSnapshot, ApiError> {
+    let (by_id, votes) = user_tracks_and_votes(pool, user_id, playlist_id).await?;
+    let ranked = replay_tracks(by_id, &votes);
+    let total_ranked = ranked.len();
+
+    let found = ranked.into_iter().find(|entry| entry.track.id == track_id);
+
+    Ok(match found {
+        Some(entry) => PersonalTrackSnapshot {
+            rank: Some(entry.rank),
+            total_ranked,
+            rating: Some(entry.rating),
+        },
+        None => PersonalTrackSnapshot {
+            rank: None,
+            total_ranked,
+            rating: None,
+        },
+    })
+}
+
 fn replay_tracks(by_id: HashMap<Uuid, MatchupTrack>, votes: &[PersonalVote]) -> Vec<RankedTrack> {
     let mut ratings: HashMap<Uuid, f64> =
         by_id.keys().map(|id| (*id, elo::INITIAL_RATING)).collect();

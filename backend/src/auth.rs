@@ -166,6 +166,31 @@ impl FromRequestParts<AppState> for AuthUser {
     }
 }
 
+/// Best-effort authentication for public endpoints that add personal context
+/// when a valid session is present. Missing or invalid sessions are treated as
+/// anonymous; database failures still surface as server errors.
+pub struct OptionalAuthUser(pub Option<User>);
+
+impl FromRequestParts<AppState> for OptionalAuthUser {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let jar = CookieJar::from_headers(&parts.headers);
+        if jar.get(SESSION_COOKIE).is_none() {
+            return Ok(Self(None));
+        }
+
+        match AuthUser::from_request_parts(parts, state).await {
+            Ok(AuthUser(user)) => Ok(Self(Some(user))),
+            Err(ApiError::Unauthorized(_)) => Ok(Self(None)),
+            Err(error) => Err(error),
+        }
+    }
+}
+
 /// Same as [`AuthUser`], but rejects non-admins.
 pub struct AdminUser(pub User);
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { RequireAuth } from '../components/RequireAuth'
+import { TrackDetailPanel } from '../components/TrackDetailPanel'
 import { TrackFilters } from '../components/TrackFilters'
 import { useAuth } from '../context/AuthContext'
 import { ApiError, api } from '../lib/api'
@@ -56,42 +57,59 @@ function StatPill({ label, value }: { label: string; value: string }) {
 function TrackRow({
   entry,
   highlight,
+  expanded,
+  onToggle,
 }: {
   entry: PersonalRankedTrack
   highlight: boolean
+  expanded: boolean
+  onToggle: (id: string) => void
 }) {
   return (
-    <li
-      className={`pv-list-row grid grid-cols-[2.5rem_2.5rem_1fr_auto] items-center gap-3 border-b border-line px-3 py-3 last:border-b-0 ${
-        highlight ? 'bg-[var(--playlist-accent-tint)]' : ''
-      }`}
-    >
-      <span className="font-serif text-xl leading-none text-muted">
-        {String(entry.rank).padStart(2, '0')}
-      </span>
-
-      <Cover image={entry.track.album_image_url} title={entry.track.title} />
-
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium leading-tight">
-          {entry.track.title}
-        </p>
-        <p className="mt-0.5 truncate font-mono text-[9px] uppercase tracking-[0.12em] text-muted">
-          {entry.track.artists}
-        </p>
-      </div>
-
-      <div className="flex items-center justify-end gap-3 font-mono text-[9px] uppercase tracking-[0.1em] text-muted sm:gap-4">
-        <span>
-          <span className="text-ink">{entry.wins}</span> W
+    <li className="border-b border-line last:border-b-0">
+      <button
+        type="button"
+        onClick={() => onToggle(entry.track.id)}
+        aria-expanded={expanded}
+        aria-label={`${expanded ? 'Hide' : 'Show'} stats for ${entry.track.title} by ${entry.track.artists}`}
+        className={`pv-list-row grid w-full grid-cols-[2.5rem_2.5rem_1fr_auto] items-center gap-3 px-3 py-3 text-left transition hover:bg-paper ${
+          highlight ? 'bg-[var(--playlist-accent-tint)]' : ''
+        }`}
+      >
+        <span className="font-serif text-xl leading-none text-muted">
+          {String(entry.rank).padStart(2, '0')}
         </span>
-        <span className="hidden sm:inline">
-          <span className="text-ink">{entry.comparisons}</span> D
-        </span>
-        <span className="font-serif text-lg leading-none text-ink">
-          {Math.round(entry.rating)}
-        </span>
-      </div>
+
+        <Cover image={entry.track.album_image_url} title={entry.track.title} />
+
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium leading-tight">
+            {entry.track.title}
+          </p>
+          <p className="mt-0.5 truncate font-mono text-[9px] uppercase tracking-[0.12em] text-muted">
+            {entry.track.artists}
+          </p>
+        </div>
+
+        <div className="flex items-center justify-end gap-3 font-mono text-[9px] uppercase tracking-[0.1em] text-muted sm:gap-4">
+          <span>
+            <span className="text-ink">{entry.wins}</span> W
+          </span>
+          <span className="hidden sm:inline">
+            <span className="text-ink">{entry.comparisons}</span> D
+          </span>
+          <span className="font-serif text-lg leading-none text-ink">
+            {Math.round(entry.rating)}
+          </span>
+        </div>
+      </button>
+
+      {expanded && (
+        <TrackDetailPanel
+          trackId={entry.track.id}
+          preferredScope="personal"
+        />
+      )}
     </li>
   )
 }
@@ -104,6 +122,9 @@ function RankingScreen() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  const [expandedTracks, setExpandedTracks] = useState<Set<string>>(
+    () => new Set(),
+  )
   const [searchInput, setSearchInput] = useState('')
   const [query, setQuery] = useState('')
   const [artistId, setArtistId] = useState<string | null>(null)
@@ -140,6 +161,15 @@ function RankingScreen() {
     setArtistId(null)
     setDecade(null)
     setGenre(null)
+  }, [])
+
+  const toggleTrack = useCallback((id: string) => {
+    setExpandedTracks((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }, [])
 
   const reload = useCallback(() => {
@@ -509,6 +539,8 @@ function RankingScreen() {
                     key={entry.track.id}
                     entry={entry}
                     highlight={!hasFilters && entry.rank === 1}
+                    expanded={expandedTracks.has(entry.track.id)}
+                    onToggle={toggleTrack}
                   />
                 ))}
               </ol>

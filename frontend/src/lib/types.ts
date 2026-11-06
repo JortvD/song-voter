@@ -329,6 +329,82 @@ export type PublicChart = {
   tracks: ChartEntry[]
 }
 
+export type TrackHighlight = {
+  id: string
+  spotify_id: string
+  title: string
+  artists: string
+  album_image_url: string | null
+  rating: number | null
+}
+
+export type TrackDuel = {
+  opponent: TrackHighlight
+  won: boolean
+  occurred_at: string
+}
+
+export type AlbumDetail = {
+  id: string | null
+  name: string
+  artists: string
+  image_url: string | null
+  album_type: string | null
+  release_year: number | null
+  total_tracks: number | null
+  playlist_track_count: number
+  average_rating: number | null
+  best_track: TrackHighlight | null
+}
+
+export type ArtistDetail = {
+  id: string
+  name: string
+  genre: string | null
+  track_count: number
+  average_rating: number | null
+}
+
+export type OfficialTrackStats = {
+  rank: number
+  total_tracks: number
+  rating: number
+  total_rating_average: number | null
+  comparisons: number
+  wins: number
+  losses: number
+  win_rate: number | null
+  voters: number
+  unique_opponents: number
+  first_duel_at: string | null
+  last_duel_at: string | null
+  recent_duels: TrackDuel[]
+}
+
+export type PersonalTrackStats = {
+  rank: number | null
+  total_ranked: number
+  rating: number | null
+  comparisons: number
+  wins: number
+  losses: number
+  win_rate: number | null
+  first_duel_at: string | null
+  last_duel_at: string | null
+  recent_duels: TrackDuel[]
+}
+
+export type TrackDetail = {
+  playlist_id: string
+  playlist_name: string
+  revealed: boolean
+  track: MatchupTrack
+  album: AlbumDetail | null
+  artists: ArtistDetail[]
+  official: OfficialTrackStats | null
+  personal: PersonalTrackStats | null
+}
+
 export type AggregateEntry = {
   id: string
   name: string

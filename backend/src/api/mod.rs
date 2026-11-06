@@ -16,6 +16,7 @@ pub mod settings;
 pub mod spotify;
 pub mod stories;
 pub mod streak;
+pub mod track_detail;
 pub mod users;
 pub mod vote;
 
@@ -31,6 +32,7 @@ pub fn router() -> Router<AppState> {
         .route("/chart/artists", get(aggregate::artists))
         .route("/chart/albums", get(aggregate::albums))
         .route("/chart/stories", get(stories::public))
+        .route("/tracks/{id}", get(track_detail::detail))
         .route("/vote", post(vote::cast))
         .route("/vote/undo", post(vote::undo))
         .route("/me/ranking", get(ranking::personal))

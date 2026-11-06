@@ -92,6 +92,7 @@ docker compose logs -f backend
 | `GET` | `/api/chart/artists` | public | Revealed artist view grouped from official track scores (`limit`, `offset`, `q`, `decade`, `genre`, `artist`) |
 | `GET` | `/api/chart/albums` | public | Revealed album view grouped from official track scores (`limit`, `offset`, `q`, `decade`, `genre`, `artist`) |
 | `GET` | `/api/chart/stories` | public | Story cards and top-5 leaderboards after The Reveal |
+| `GET` | `/api/tracks/{id}` | public/session | Song dossier with wins, losses, voters, album and artist context; personal stats appear when signed in and official stats after The Reveal |
 | `POST` | `/api/admin/reveal` | admin | Open or seal The Reveal (clears a pending reveal schedule) |
 | `POST` | `/api/admin/reveal/schedule` | admin | Schedule a reveal (`reveal_at`, `pause_voting`) |
 | `POST` | `/api/admin/reveal/schedule/cancel` | admin | Cancel a scheduled reveal |

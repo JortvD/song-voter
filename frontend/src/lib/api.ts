@@ -26,6 +26,7 @@ import type {
   PlaylistOverview,
   PublicChart,
   SpotifyStatus,
+  TrackDetail,
   TracksPage,
   UndoResponse,
   User,
@@ -238,6 +239,8 @@ export const api = {
     }),
   getChartStories: (signal?: AbortSignal) =>
     request<ChartStories>('/api/chart/stories', { signal }),
+  getTrackDetail: (id: string, signal?: AbortSignal) =>
+    request<TrackDetail>(`/api/tracks/${id}`, { signal }),
   getMetadataStatus: () => request<MetadataStatus>('/api/admin/metadata'),
   backfillMetadata: () =>
     request<{ run_id: string; started: boolean }>('/api/admin/metadata/backfill', {
