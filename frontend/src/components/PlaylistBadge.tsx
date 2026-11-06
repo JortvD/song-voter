@@ -34,8 +34,22 @@ export function PlaylistBadge({ status, loading = false, compact = false }: Play
 
       <span className="min-w-0">
         <span className="flex items-center gap-1.5">
-          <span className="pv-sticker px-1.5 py-0.5 text-[9px]">
-            {status?.playlist_name ? 'Now voting' : 'Blank tape'}
+          <span
+            className={`pv-sticker px-1.5 py-0.5 text-[9px] ${
+              status?.playlist_name && status.started_at === null
+                ? 'pv-sticker-butter'
+                : status?.voting_paused
+                  ? 'pv-sticker-paper'
+                  : ''
+            }`}
+          >
+            {!status?.playlist_name
+              ? 'Blank tape'
+              : status.started_at === null
+                ? 'Scheduled'
+                : status.voting_paused
+                  ? 'Voting paused'
+                  : 'Now voting'}
           </span>
           {!compact && status && (
             <span className="hidden font-mono text-[9px] uppercase tracking-[0.16em] text-muted sm:inline">

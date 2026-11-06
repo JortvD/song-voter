@@ -1,48 +1,88 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
-import { Kbd } from '../components/PreviewPlayer'
+import { Kbd } from '../components/Kbd'
 import { RequireAuth } from '../components/RequireAuth'
-import { TapeCard } from '../components/TapeCard'
+import { AutoplayToggle } from '../components/duel/AutoplayToggle'
+import { CassetteHub } from '../components/duel/CassetteHub'
+import { DuelCassette } from '../components/duel/DuelCassette'
+import { DuelStatus } from '../components/duel/DuelStatus'
+import { RecentDuels } from '../components/duel/RecentDuels'
+import { StreakBar } from '../components/duel/StreakBar'
 import { useAuth } from '../context/AuthContext'
+import { usePlaylist } from '../context/PlaylistContext'
 import { ApiError, api } from '../lib/api'
-import { playStamp } from '../lib/sound'
-import type { Matchup } from '../lib/types'
+import {
+  playPickConfirm,
+  playPickPress,
+  playStreakGoal,
+  playStreakMilestone,
+  playToggle,
+  playUndo,
+} from '../lib/sound'
+import { localTimezone } from '../lib/time'
+import type { DuelHistoryItem, Matchup, StreakSummary } from '../lib/types'
+
+const AUTOPREVIEW_KEY = 'pv-autoplay-previews'
+const CROSSFADE_MS = 200
+
+function initialAutoPreview(): boolean {
+  try {
+    return window.localStorage.getItem(AUTOPREVIEW_KEY) === 'on'
+  } catch {
+    return false
+  }
+}
+
+function formatWhen(value: string | null) {
+  if (!value) return 'soon'
+  return new Date(value).toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })
+}
 
 function sleep(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }
 
-function formatNumber(value: number) {
-  return value.toLocaleString()
+function vibrate() {
+  const nav = navigator as Navigator & {
+    vibrate?: (pattern: number | number[]) => boolean
+  }
+  nav.vibrate?.(12)
 }
 
-function LegendItem({ keys, label }: { keys: string[]; label: string }) {
+function DuelSkeletonSide() {
   return (
-    <span className="flex items-center gap-1 font-mono text-[9px] uppercase tracking-[0.12em] text-paper/85">
-      {keys.map((key, index) => (
-        <span key={key} className="flex items-center gap-1">
-          {index > 0 && <span className="text-paper/30">/</span>}
-          <Kbd>{key}</Kbd>
-        </span>
-      ))}
-      {label}
-    </span>
+    <div className="pv-duel-side">
+      <div className="pv-duel-skel-cover" />
+      <div className="pv-duel-skel-copy">
+        <span className="pv-duel-skel-line w-14" />
+        <span className="pv-duel-skel-line h-4 w-4/5" />
+        <span className="pv-duel-skel-line h-2.5 w-2/3" />
+        <span className="pv-duel-skel-line h-3 w-16" />
+      </div>
+      <div className="pv-duel-skel-listen" />
+    </div>
   )
 }
 
-function ShortcutLegend() {
+function DuelSkeleton() {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-      <LegendItem keys={['1']} label="pick A" />
-      <LegendItem keys={['2']} label="pick B" />
-      <LegendItem keys={['Z']} label="undo" />
+    <div className="pv-duel-cassette pv-duel-skeleton" aria-hidden="true">
+      <div className="pv-duel-sides">
+        <DuelSkeletonSide />
+        <CassetteHub playing={false} />
+        <DuelSkeletonSide />
+      </div>
     </div>
   )
 }
 
 function VoteScreen() {
   const { user } = useAuth()
+  const { status, loading: playlistLoading } = usePlaylist()
   const [matchup, setMatchup] = useState<Matchup | null>(null)
   const [loading, setLoading] = useState(true)
   const [voting, setVoting] = useState(false)
@@ -51,21 +91,132 @@ function VoteScreen() {
   const [exhausted, setExhausted] = useState(false)
   const [pickedId, setPickedId] = useState<string | null>(null)
   const [sessionPicks, setSessionPicks] = useState(0)
-  const [streak, setStreak] = useState(0)
   const [votesCast, setVotesCast] = useState(0)
   const [totalTracks, setTotalTracks] = useState(0)
   const [tracksSeen, setTracksSeen] = useState(0)
   const [comparedPairs, setComparedPairs] = useState(0)
   const [playlistName, setPlaylistName] = useState('')
   const [playingSide, setPlayingSide] = useState<'a' | 'b' | null>(null)
+  const [recentDuels, setRecentDuels] = useState<DuelHistoryItem[]>([])
+  const [recentMaxHeight, setRecentMaxHeight] = useState<number | null>(null)
+  const [autoPreview, setAutoPreview] = useState(initialAutoPreview)
+  const [autoDockVisible, setAutoDockVisible] = useState(false)
 
+  const stageRef = useRef<HTMLDivElement | null>(null)
+  const cardRef = useRef<HTMLDivElement | null>(null)
+  const autoDockRef = useRef<HTMLDivElement | null>(null)
   const audioA = useRef<HTMLAudioElement | null>(null)
   const audioB = useRef<HTMLAudioElement | null>(null)
   const nextSide = useRef<'a' | 'b'>('a')
+  const autoPreviewRef = useRef(autoPreview)
+  const fadeFrames = useRef<Record<'a' | 'b', number | null>>({
+    a: null,
+    b: null,
+  })
+  const previousStreak = useRef<StreakSummary | null>(null)
+
+  useEffect(() => {
+    autoPreviewRef.current = autoPreview
+    try {
+      window.localStorage.setItem(AUTOPREVIEW_KEY, autoPreview ? 'on' : 'off')
+    } catch {
+      // Storage can be disabled; the in-memory preference still works.
+    }
+  }, [autoPreview])
+
+  useEffect(() => {
+    let frame = 0
+    let cancelled = false
+
+    const update = () => {
+      frame = 0
+      if (cancelled) return
+      const dock = autoDockRef.current
+      if (!dock) return
+
+      const tabs = document.querySelector<HTMLElement>(
+        'nav[aria-label="Primary"]',
+      )
+      const bottom = tabs
+        ? tabs.getBoundingClientRect().top
+        : window.innerHeight
+      setAutoDockVisible(dock.getBoundingClientRect().bottom <= bottom - 4)
+    }
+
+    const schedule = () => {
+      if (frame) return
+      frame = window.requestAnimationFrame(update)
+    }
+
+    update()
+    void document.fonts?.ready.then(schedule)
+    window.addEventListener('scroll', schedule, { passive: true })
+    window.addEventListener('resize', schedule)
+    return () => {
+      cancelled = true
+      if (frame) window.cancelAnimationFrame(frame)
+      window.removeEventListener('scroll', schedule)
+      window.removeEventListener('resize', schedule)
+    }
+  }, [matchup, recentMaxHeight, recentDuels.length, votesCast])
+
+  const cancelFade = useCallback((side: 'a' | 'b') => {
+    const frame = fadeFrames.current[side]
+    if (frame !== null) cancelAnimationFrame(frame)
+    fadeFrames.current[side] = null
+  }, [])
+
+  const fadeVolume = useCallback(
+    (
+      side: 'a' | 'b',
+      targetVolume: number,
+      duration: number,
+      pauseAtEnd = false,
+    ) => {
+      const audio = side === 'a' ? audioA.current : audioB.current
+      if (!audio) return
+
+      cancelFade(side)
+      const from = audio.volume
+      const started = performance.now()
+
+      const step = (now: number) => {
+        const progress = Math.min(1, (now - started) / Math.max(1, duration))
+        audio.volume = Math.max(
+          0,
+          Math.min(1, from + (targetVolume - from) * progress),
+        )
+
+        if (progress < 1) {
+          fadeFrames.current[side] = requestAnimationFrame(step)
+        } else {
+          fadeFrames.current[side] = null
+          if (pauseAtEnd) audio.pause()
+        }
+      }
+
+      fadeFrames.current[side] = requestAnimationFrame(step)
+    },
+    [cancelFade],
+  )
+
+  const pauseAll = useCallback(() => {
+    cancelFade('a')
+    cancelFade('b')
+
+    for (const audio of [audioA.current, audioB.current]) {
+      try {
+        audio?.pause()
+        if (audio) audio.volume = 1
+      } catch {
+        // Ignore teardown races.
+      }
+    }
+    setPlayingSide(null)
+  }, [cancelFade])
 
   const onPlayA = useCallback((playing: boolean) => {
     if (playing) {
-      audioB.current?.pause()
       nextSide.current = 'b'
       setPlayingSide('a')
     } else {
@@ -75,7 +226,6 @@ function VoteScreen() {
 
   const onPlayB = useCallback((playing: boolean) => {
     if (playing) {
-      audioA.current?.pause()
       nextSide.current = 'a'
       setPlayingSide('b')
     } else {
@@ -90,31 +240,52 @@ function VoteScreen() {
     setTracksSeen(next.tracks_seen)
     setComparedPairs(next.compared_pairs)
     setPlaylistName(next.playlist_name)
+    setRecentDuels(next.recent_duels ?? [])
     setExhausted(false)
     setError(null)
+    setPickedId(null)
   }, [])
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
+  const votingBlocked = Boolean(
+    status?.playlist_name &&
+      (status.started_at === null || status.voting_paused),
+  )
 
-    try {
-      applyMatchup(await api.getMatchup())
-    } catch (caught) {
-      if (caught instanceof ApiError && caught.status === 409) {
-        setExhausted(true)
-        setMatchup(null)
-      } else {
-        setError(caught instanceof ApiError ? caught.message : 'Could not load a duel')
-        setMatchup(null)
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      if (playlistLoading || !status || votingBlocked) {
+        setLoading(false)
+        return
       }
-    } finally {
-      setLoading(false)
-    }
-  }, [applyMatchup])
+
+      setLoading(true)
+      setError(null)
+
+      try {
+        applyMatchup(await api.getMatchup(localTimezone(), signal))
+      } catch (caught) {
+        if (signal?.aborted) return
+        if (caught instanceof ApiError && caught.status === 409) {
+          setExhausted(true)
+          setMatchup(null)
+        } else {
+          setError(
+            caught instanceof ApiError ? caught.message : 'Could not load a duel',
+          )
+          setMatchup(null)
+        }
+      } finally {
+        if (!signal?.aborted) setLoading(false)
+      }
+    },
+    [applyMatchup, playlistLoading, status?.playlist_id, votingBlocked],
+  )
 
   useEffect(() => {
-    if (user) void load()
+    if (!user) return
+    const controller = new AbortController()
+    void load(controller.signal)
+    return () => controller.abort()
   }, [user, load])
 
   const matchupKey = matchup
@@ -122,22 +293,119 @@ function VoteScreen() {
     : 'none'
 
   useEffect(() => {
+    cancelFade('a')
+    cancelFade('b')
+
     for (const audio of [audioA.current, audioB.current]) {
       if (!audio) continue
       try {
         audio.pause()
         audio.currentTime = 0
+        audio.volume = 1
       } catch {
         // The preview may not have loaded metadata yet.
       }
     }
     setPlayingSide(null)
     nextSide.current = 'a'
-  }, [matchupKey])
+  }, [matchupKey, cancelFade])
 
-  const playSide = useCallback(
+  useLayoutEffect(() => {
+    if (!matchup) {
+      setRecentMaxHeight(null)
+      return
+    }
+
+    let cancelled = false
+
+    const measure = () => {
+      if (cancelled) return
+      if (window.innerWidth >= 1024) {
+        setRecentMaxHeight(null)
+        return
+      }
+
+      const stage = stageRef.current
+      const card = cardRef.current
+      if (!stage || !card) return
+
+      const tabs = document.querySelector<HTMLElement>('nav[aria-label="Primary"]')
+      const bottom = tabs
+        ? tabs.getBoundingClientRect().top
+        : window.innerHeight - 64
+      // On phones the auto-preview dock is absolute and hidden until scroll,
+      // so the card height is just the cassette and recent duels gets the rest.
+      const available =
+        bottom - stage.getBoundingClientRect().top - card.offsetHeight - 12 - 8
+
+      setRecentMaxHeight(Math.min(Math.max(Math.floor(available), 0), 190))
+    }
+    measure()
+    const observer =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    if (observer && cardRef.current) observer.observe(cardRef.current)
+    window.addEventListener('resize', measure)
+    void document.fonts?.ready.then(measure)
+
+    return () => {
+      cancelled = true
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [matchup, error, votesCast, recentDuels.length])
+
+  const startSide = useCallback(
+    (side: 'a' | 'b', options: { auto?: boolean } = {}) => {
+      if (!matchup) return false
+
+      const previewUrl =
+        side === 'a' ? matchup.track_a.preview_url : matchup.track_b.preview_url
+      const target = side === 'a' ? audioA.current : audioB.current
+
+      if (!previewUrl || !target) {
+        if (!options.auto) {
+          setError(
+            `No Spotify preview is available for track ${side.toUpperCase()}.`,
+          )
+        }
+        return false
+      }
+
+      const otherSide = side === 'a' ? 'b' : 'a'
+      const other = otherSide === 'a' ? audioA.current : audioB.current
+      nextSide.current = otherSide
+
+      if (!target.paused) {
+        fadeVolume(side, 1, CROSSFADE_MS)
+        if (other && !other.paused) fadeVolume(otherSide, 0, CROSSFADE_MS, true)
+        return true
+      }
+
+      const otherPlaying = Boolean(other && !other.paused)
+      const shouldFade = otherPlaying || options.auto === true
+      target.volume = shouldFade ? 0 : 1
+
+      void target
+        .play()
+        .then(() => {
+          setError(null)
+          if (shouldFade) fadeVolume(side, 1, CROSSFADE_MS)
+          if (otherPlaying) fadeVolume(otherSide, 0, CROSSFADE_MS, true)
+        })
+        .catch(() => {
+          target.volume = 1
+          setPlayingSide((current) => (current === side ? null : current))
+          if (!options.auto) setError('Could not play the Spotify preview.')
+        })
+
+      return true
+    },
+    [matchup, fadeVolume],
+  )
+
+  const toggleSide = useCallback(
     (side: 'a' | 'b') => {
-      if (!matchup) return
+      if (!matchup || voting || undoing) return
 
       const previewUrl =
         side === 'a' ? matchup.track_a.preview_url : matchup.track_b.preview_url
@@ -148,21 +416,81 @@ function VoteScreen() {
         return
       }
 
-      const other = side === 'a' ? audioB.current : audioA.current
-      other?.pause()
-      nextSide.current = side === 'a' ? 'b' : 'a'
+      if (!target.paused) {
+        fadeVolume(side, 0, 160, true)
+        setPlayingSide(null)
+        return
+      }
 
-      void target
-        .play()
-        .then(() => setError(null))
-        .catch(() => setError('Could not play the Spotify preview.'))
+      startSide(side)
     },
-    [matchup],
+    [matchup, voting, undoing, fadeVolume, startSide],
   )
 
   const playNext = useCallback(() => {
-    playSide(nextSide.current)
-  }, [playSide])
+    startSide(nextSide.current)
+  }, [startSide])
+
+  const handleEnded = useCallback(
+    (side: 'a' | 'b') => {
+      setPlayingSide(null)
+
+      if (!autoPreviewRef.current) return
+      if (side !== 'a') return
+
+      const started = startSide('b', { auto: true })
+      if (!started) setPlayingSide(null)
+    },
+    [startSide],
+  )
+
+  const toggleAutoPreview = useCallback(() => {
+    const next = !autoPreviewRef.current
+    autoPreviewRef.current = next
+    setAutoPreview(next)
+    playToggle(next)
+
+    if (next) {
+      const alreadyPlaying =
+        (audioA.current && !audioA.current.paused) ||
+        (audioB.current && !audioB.current.paused)
+
+      if (!alreadyPlaying) {
+        const started = startSide('a', { auto: true })
+        if (!started) startSide('b', { auto: true })
+      }
+    }
+  }, [startSide])
+
+  const startSideRef = useRef(startSide)
+  startSideRef.current = startSide
+
+  useEffect(() => {
+    if (!autoPreviewRef.current || !matchup) return
+
+    const started = startSideRef.current('a', { auto: true })
+    if (!started) startSideRef.current('b', { auto: true })
+  }, [matchupKey])
+
+  useEffect(() => {
+    const current = matchup?.streak ?? null
+    const previous = previousStreak.current
+
+    if (!current) {
+      previousStreak.current = null
+      return
+    }
+
+    if (previous && !previous.today_met && current.today_met) {
+      if ([7, 30, 100].includes(current.current)) {
+        playStreakMilestone()
+      } else {
+        playStreakGoal()
+      }
+    }
+
+    previousStreak.current = current
+  }, [matchup?.streak])
 
   const vote = useCallback(
     async (trackId: string) => {
@@ -171,7 +499,10 @@ function VoteScreen() {
       setVoting(true)
       setError(null)
       setPickedId(trackId)
-      playStamp()
+      pauseAll()
+      const pickedSide = trackId === matchup.track_a.id ? 'a' : 'b'
+      playPickPress(pickedSide)
+      vibrate()
 
       try {
         const response = await api.vote({
@@ -180,31 +511,39 @@ function VoteScreen() {
           winner: trackId,
         })
 
+        playPickConfirm(pickedSide)
         setVotesCast(response.votes_cast)
         setSessionPicks((value) => value + 1)
-        setStreak((value) => value + 1)
 
-        await sleep(320)
+        // Start fetching the next duel immediately, but keep the stamp visible
+        // for a beat so rapid picks still feel like picks.
+        const [nextResult] = await Promise.allSettled([
+          api.getMatchup(localTimezone()),
+          sleep(280),
+        ])
 
-        try {
-          applyMatchup(await api.getMatchup())
-        } catch (caught) {
-          if (caught instanceof ApiError && caught.status === 409) {
-            setExhausted(true)
-            setMatchup(null)
-          } else {
-            setError(caught instanceof ApiError ? caught.message : 'Could not load the next duel')
-            setMatchup(null)
-          }
+        if (nextResult.status === 'fulfilled') {
+          applyMatchup(nextResult.value)
+        } else if (
+          nextResult.reason instanceof ApiError &&
+          nextResult.reason.status === 409
+        ) {
+          setExhausted(true)
+          setMatchup(null)
+        } else {
+          setError("Your pick saved, but the next duel didn't load. Try again.")
+          setMatchup(null)
         }
       } catch (caught) {
-        setError(caught instanceof ApiError ? caught.message : "That pick didn't save. Try again.")
+        setError(
+          caught instanceof ApiError ? caught.message : "That pick didn't save. Try again.",
+        )
       } finally {
         setVoting(false)
         setPickedId(null)
       }
     },
-    [matchup, voting, undoing, applyMatchup],
+    [matchup, voting, undoing, pauseAll, applyMatchup],
   )
 
   const undo = useCallback(async () => {
@@ -212,16 +551,19 @@ function VoteScreen() {
 
     setUndoing(true)
     setError(null)
+    pauseAll()
 
     try {
-      const undone = await api.undoVote()
+      const undone = await api.undoVote(localTimezone())
+      playUndo()
 
       setVotesCast(undone.votes_cast)
       setSessionPicks((value) => Math.max(0, value - 1))
-      setStreak(0)
       setComparedPairs(undone.compared_pairs)
       setTracksSeen(undone.tracks_seen)
       setExhausted(false)
+      setPickedId(null)
+      setRecentDuels(undone.recent_duels ?? [])
       setMatchup({
         playlist_id: undone.playlist_id,
         playlist_name: playlistName || 'Playlist Voter',
@@ -231,13 +573,17 @@ function VoteScreen() {
         tracks_seen: undone.tracks_seen,
         total_tracks: totalTracks,
         votes_cast: undone.votes_cast,
+        recent_duels: undone.recent_duels ?? [],
+        streak: undone.streak,
       })
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : "That undo didn't work. Try again.")
+      setError(
+        caught instanceof ApiError ? caught.message : "That undo didn't work. Try again.",
+      )
     } finally {
       setUndoing(false)
     }
-  }, [undoing, voting, votesCast, playlistName, totalTracks])
+  }, [undoing, voting, votesCast, pauseAll, playlistName, totalTracks])
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -255,6 +601,8 @@ function VoteScreen() {
       }
 
       if (event.code === 'Space' || event.key === ' ') {
+        // Let the focused control handle its own Space activation.
+        if (target?.closest('button, a, [role="button"]')) return
         event.preventDefault()
         playNext()
         return
@@ -262,10 +610,20 @@ function VoteScreen() {
 
       const key = event.key.toLowerCase()
 
-      if (key === '1' || event.code === 'Numpad1') {
+      if (
+        key === '1' ||
+        event.code === 'Numpad1' ||
+        key === 'a' ||
+        event.key === 'ArrowLeft'
+      ) {
         event.preventDefault()
         void vote(matchup.track_a.id)
-      } else if (key === '2' || event.code === 'Numpad2') {
+      } else if (
+        key === '2' ||
+        event.code === 'Numpad2' ||
+        key === 'b' ||
+        event.key === 'ArrowRight'
+      ) {
         event.preventDefault()
         void vote(matchup.track_b.id)
       } else if (key === 'z' && votesCast > 0) {
@@ -278,211 +636,209 @@ function VoteScreen() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [matchup, voting, undoing, votesCast, vote, undo, playNext])
 
-  const progress =
-    totalTracks > 0 ? Math.min(100, Math.round((tracksSeen / totalTracks) * 100)) : 0
+  const busy = voting || undoing
+
+  if (playlistLoading || !status) {
+    return (
+      <main className="pv-duel-page mx-auto flex w-full max-w-6xl flex-1 flex-col px-3 pt-3 sm:px-6 sm:pt-4 lg:px-8">
+        <div className="my-auto">
+          <DuelSkeleton />
+        </div>
+      </main>
+    )
+  }
+
+  if (votingBlocked) {
+    const scheduled = status.started_at === null
+
+    return (
+      <main className="pv-duel-page mx-auto flex w-full max-w-6xl flex-1 flex-col px-3 pt-3 sm:px-6 sm:pt-4 lg:px-8">
+        <section className="pv-duel-empty my-auto">
+          <span
+            className={`pv-sticker ${
+              scheduled ? 'pv-sticker-butter' : 'pv-sticker-paper'
+            }`}
+          >
+            {scheduled ? 'Scheduled' : 'Voting paused'}
+          </span>
+          <h1 className="mt-3 font-serif text-3xl leading-none tracking-[-0.03em] sm:text-4xl">
+            {scheduled ? 'The tape isn’t open yet.' : 'Voting is paused.'}
+          </h1>
+          <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-muted">
+            {scheduled
+              ? `Voting opens ${formatWhen(
+                  status.scheduled_start_at,
+                )}. You can log in now; duels unlock then.`
+              : 'The admin has paused new picks. Existing picks and rankings are safe.'}
+          </p>
+          <div className="mt-5 flex flex-wrap justify-center gap-3">
+            <Link to="/standings" className="btn-ghost">
+              The Standings
+            </Link>
+            <Link to="/stats" className="btn-ghost">
+              The Stats
+            </Link>
+            <Link to="/" className="btn-ghost">
+              Home
+            </Link>
+          </div>
+        </section>
+      </main>
+    )
+  }
 
   return (
-    <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-32 pt-4 sm:px-6 sm:pt-5 md:pb-6 lg:px-8">
-      <header className="flex flex-wrap items-end justify-between gap-3 border-b-2 border-ink/15 pb-3">
-        <div>
-          <p className="pv-label">
-            Duel
-            {playlistName ? ` · now playing from ${playlistName}` : ''}
-          </p>
-          <h1 className="mt-1 font-serif text-3xl leading-none tracking-[-0.04em] sm:text-4xl">
-            Side A or Side B?
-          </h1>
-          <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
-            {formatNumber(comparedPairs)} {comparedPairs === 1 ? 'duel' : 'duels'} ·{' '}
-            {formatNumber(votesCast)} {votesCast === 1 ? 'pick' : 'picks'} ·{' '}
-            {formatNumber(sessionPicks)} this session
-          </p>
-        </div>
+    <main className="pv-duel-page mx-auto flex w-full max-w-6xl flex-1 flex-col px-3 pt-3 sm:px-6 sm:pt-4 lg:px-8">
+      <DuelStatus
+        round={sessionPicks + 1}
+        comparedPairs={comparedPairs}
+        votesCast={votesCast}
+        tracksSeen={tracksSeen}
+        totalTracks={totalTracks}
+        undoing={undoing}
+        disabled={busy}
+        onUndo={() => void undo()}
+      />
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Link to="/your-ranking" className="btn-ghost">
-            Your Ranking
-          </Link>
-          <button
-            type="button"
-            onClick={() => void undo()}
-            disabled={undoing || voting || votesCast === 0}
-            className="btn-ghost"
-          >
-            {undoing ? 'Undoing…' : 'Undo'}
-            <Kbd>Z</Kbd>
-          </button>
-        </div>
-      </header>
+      {matchup && <StreakBar streak={matchup.streak} />}
 
-      {matchup && totalTracks > 0 && (
-        <div className="mt-4">
-          <div className="flex items-center justify-between font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
-            <span>
-              {formatNumber(tracksSeen)} of {formatNumber(totalTracks)} songs covered
-            </span>
-            <span>{progress}%</span>
-          </div>
-          <div className="mt-1.5 h-2 overflow-hidden rounded-full border-2 border-ink/20 bg-card">
-            <div
-              className="h-full rounded-full bg-[var(--playlist-accent-strong)] transition-[width] duration-300"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-        </div>
-      )}
+      <p className="sr-only" aria-live="polite">
+        {pickedId && matchup
+          ? `Picked ${
+              pickedId === matchup.track_a.id
+                ? matchup.track_a.title
+                : matchup.track_b.title
+            }`
+          : ''}
+      </p>
 
-      {error && (
-        <p
-          role="alert"
-          className="mt-4 rounded-xl border-2 border-danger bg-danger/5 px-3 py-2 text-sm text-danger"
-        >
+      {error && (matchup || exhausted) && (
+        <p role="alert" className="pv-duel-error">
           {error}
         </p>
       )}
 
-      {loading ? (
-        <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_84px_1fr]">
-          <div className="h-96 animate-pulse rounded-[18px] border-2 border-line bg-card" />
-          <div className="hidden lg:block" />
-          <div className="h-96 animate-pulse rounded-[18px] border-2 border-line bg-card" />
-        </div>
-      ) : exhausted ? (
-        <section className="pv-card mt-4 p-6 text-center sm:p-10">
-          <span className="pv-sticker">All duels done</span>
-          <h2 className="mt-4 font-serif text-4xl leading-none tracking-[-0.03em]">
-            You&apos;ve heard every side.
-          </h2>
-          <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-muted">
-            Your tape has {formatNumber(votesCast)} {votesCast === 1 ? 'pick' : 'picks'}.
-            The standings stay sealed until The Reveal.
-          </p>
-          <div className="mt-6 flex flex-wrap justify-center gap-3">
-            <Link to="/your-ranking" className="btn">
-              Open your ranking
-            </Link>
-            <button
-              type="button"
-              onClick={() => void undo()}
-              disabled={undoing || votesCast === 0}
-              className="btn-ghost"
+      <div className="flex min-h-0 flex-1 flex-col py-3">
+        <div className="flex min-h-0 flex-1 flex-col">
+          {loading ? (
+            <div className="my-auto">
+              <DuelSkeleton />
+            </div>
+          ) : exhausted ? (
+            <section className="pv-duel-empty my-auto">
+              <span className="pv-sticker">All duels done</span>
+              <h1 className="mt-3 font-serif text-3xl leading-none tracking-[-0.03em] sm:text-4xl">
+                You&apos;ve heard every side.
+              </h1>
+              <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-muted">
+                Your tape has {votesCast.toLocaleString()}{' '}
+                {votesCast === 1 ? 'pick' : 'picks'}. The standings stay sealed
+                until The Reveal.
+              </p>
+              <div className="mt-5 flex flex-wrap justify-center gap-3">
+                <Link to="/your-ranking" className="btn">
+                  Open your ranking
+                </Link>
+                <Link to="/your-duels" className="btn-ghost">
+                  See all your duels
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => void undo()}
+                  disabled={undoing || votesCast === 0}
+                  className="btn-ghost"
+                >
+                  Undo last pick
+                </button>
+              </div>
+            </section>
+          ) : matchup ? (
+            <div
+              ref={stageRef}
+              className="flex min-h-0 flex-1 flex-col gap-3"
             >
-              Undo last pick
-            </button>
-          </div>
-        </section>
-      ) : matchup ? (
-        <>
-          <div className="pv-deck mt-4">
-            <div className="pv-deck-top">
-              <span>Cassette deck · Side A / Side B</span>
-              <span>Round {String(sessionPicks + 1).padStart(2, '0')}</span>
-            </div>
+              <h1 className="sr-only">Duel: pick the better side</h1>
 
-            <div className="grid items-stretch gap-3 lg:grid-cols-[1fr_84px_1fr]">
-              <TapeCard
-                side="a"
-                track={matchup.track_a}
-                picked={pickedId === matchup.track_a.id}
-                playing={playingSide === 'a'}
-                disabled={voting || undoing}
-                audioRef={audioA}
-                onPlayStateChange={onPlayA}
-                onPick={() => void vote(matchup.track_a.id)}
+              <RecentDuels
+                duels={recentDuels}
+                maxHeight={recentMaxHeight}
+                className="mx-auto min-h-0 w-full max-w-5xl flex-1"
               />
 
-              <div className="flex items-center justify-center py-1">
-                <span className="pv-vs">VS</span>
-              </div>
+              <div
+                ref={cardRef}
+                className="relative mx-auto mt-auto flex w-full max-w-5xl shrink-0 flex-col gap-3"
+              >
+                <DuelCassette
+                  matchup={matchup}
+                  pickedId={pickedId}
+                  playingSide={playingSide}
+                  disabled={busy}
+                  audioA={audioA}
+                  audioB={audioB}
+                  onPlayA={onPlayA}
+                  onPlayB={onPlayB}
+                  onTogglePreview={toggleSide}
+                  onEnded={handleEnded}
+                  onPick={(side) => {
+                    const trackId =
+                      side === 'a' ? matchup.track_a.id : matchup.track_b.id
+                    void vote(trackId)
+                  }}
+                />
 
-              <TapeCard
-                side="b"
-                track={matchup.track_b}
-                picked={pickedId === matchup.track_b.id}
-                playing={playingSide === 'b'}
-                disabled={voting || undoing}
-                audioRef={audioB}
-                onPlayStateChange={onPlayB}
-                onPick={() => void vote(matchup.track_b.id)}
-              />
-            </div>
-
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-paper/20 bg-paper/5 px-3 py-2.5">
-              <div className="flex items-center gap-2">
-                {streak > 1 ? (
-                  <span className="pv-sticker px-1.5 py-0.5 text-[9px]">
-                    {streak} in a row
-                  </span>
-                ) : (
-                  <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-paper/80">
-                    Tap a side or press Space
-                  </span>
-                )}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => playSide('a')}
-                  className={`pv-transport hidden sm:inline-flex ${
-                    playingSide === 'a' ? 'pv-transport-active' : ''
+                <div
+                  ref={autoDockRef}
+                  className={`pv-autoplay-dock ${
+                    autoDockVisible ? 'is-visible' : ''
                   }`}
-                  aria-label="Play side A"
                 >
-                  Play A
-                </button>
-                <button type="button" onClick={playNext} className="pv-transport">
-                  <Kbd>Space</Kbd> play / switch
-                </button>
-                <button
-                  type="button"
-                  onClick={() => playSide('b')}
-                  className={`pv-transport hidden sm:inline-flex ${
-                    playingSide === 'b' ? 'pv-transport-active' : ''
-                  }`}
-                  aria-label="Play side B"
-                >
-                  Play B
-                </button>
+                  <AutoplayToggle
+                    enabled={autoPreview}
+                    onToggle={toggleAutoPreview}
+                    disabled={busy}
+                  />
+                </div>
+
+                <p className="pv-duel-hint hidden lg:flex">
+                  <Kbd>1</Kbd>
+                  <span>/</span>
+                  <Kbd>2</Kbd>
+                  <span>pick</span>
+                  <span className="text-ink/25">·</span>
+                  <Kbd>←</Kbd>
+                  <span>/</span>
+                  <Kbd>→</Kbd>
+                  <span>swipe</span>
+                  <span className="text-ink/25">·</span>
+                  <Kbd>Space</Kbd>
+                  <span>preview</span>
+                  <span className="text-ink/25">·</span>
+                  <Kbd>Z</Kbd>
+                  <span>undo</span>
+                </p>
               </div>
-
-              <ShortcutLegend />
             </div>
-          </div>
-
-          <div className="fixed inset-x-0 bottom-[4.6rem] z-30 px-3 md:hidden">
-            <div className="mx-auto flex max-w-md gap-2 rounded-2xl border-2 border-ink bg-card p-2 shadow-[4px_4px_0_0_#141a2a]">
+          ) : (
+            <section className="pv-duel-empty my-auto">
+              <span className="pv-sticker pv-sticker-paper">Not ready</span>
+              <h1 className="mt-3 font-serif text-3xl leading-none tracking-[-0.03em]">
+                This duel didn&apos;t load.
+              </h1>
+              <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-muted">
+                {error ?? 'The admin may not have imported a playlist yet.'}
+              </p>
               <button
                 type="button"
-                onClick={() => void vote(matchup.track_a.id)}
-                disabled={voting || undoing}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border-2 border-ink bg-[var(--playlist-accent)] px-3 py-2.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--playlist-accent-ink)] disabled:opacity-50"
+                onClick={() => void load()}
+                className="btn mt-5"
               >
-                Pick A <Kbd>1</Kbd>
+                Try again
               </button>
-              <button
-                type="button"
-                onClick={() => void vote(matchup.track_b.id)}
-                disabled={voting || undoing}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border-2 border-ink bg-[var(--playlist-accent)] px-3 py-2.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--playlist-accent-ink)] disabled:opacity-50"
-              >
-                Pick B <Kbd>2</Kbd>
-              </button>
-            </div>
-          </div>
-        </>
-      ) : (
-        <section className="pv-card mt-4 p-6 text-center sm:p-8">
-          <span className="pv-sticker pv-sticker-paper">Not ready</span>
-          <h2 className="mt-4 font-serif text-3xl">This duel didn't load.</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted">
-            {error ?? 'The admin may not have imported a playlist yet.'}
-          </p>
-          <button type="button" onClick={() => void load()} className="btn mt-5">
-            Try again
-          </button>
-        </section>
-      )}
+            </section>
+          )}
+        </div>
+      </div>
     </main>
   )
 }

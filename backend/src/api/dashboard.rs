@@ -72,6 +72,7 @@ pub struct AdminUserRow {
     id: Uuid,
     username: String,
     is_admin: bool,
+    disabled_at: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
     votes_cast: i64,
     matchups_seen: i64,
@@ -102,6 +103,23 @@ pub struct RemovePlaylistResponse {
     removed: bool,
     removed_tracks: i64,
     removed_votes: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FullResetRequest {
+    confirm: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FullResetResponse {
+    reset: bool,
+    deleted_users: u64,
+    deleted_invites: u64,
+    deleted_playlists: u64,
+    deleted_tracks: u64,
+    deleted_votes: u64,
+    deleted_duels: u64,
+    deleted_artists: u64,
 }
 
 pub async fn stats(
@@ -147,10 +165,7 @@ pub async fn stats(
     .await?;
 
     let (playlist_name, revealed) = match playlist {
-        Some(playlist) => (
-            Some(playlist.name),
-            playlist.reveal_state == "revealed",
-        ),
+        Some(playlist) => (Some(playlist.name), playlist.reveal_state == "revealed"),
         None => (None, false),
     };
 
@@ -202,7 +217,7 @@ pub async fn users(
     };
 
     let sql = format!(
-        "SELECT u.id, u.username, u.is_admin, u.created_at, \
+        "SELECT u.id, u.username, u.is_admin, u.disabled_at, u.created_at, \
                 COALESCE(v.votes, 0) AS votes_cast, \
                 COALESCE(s.matchups, 0) AS matchups_seen, \
                 v.last_vote_at, \
@@ -253,7 +268,7 @@ pub async fn users_csv(
     let playlist_id = playlist.as_ref().map(|playlist| playlist.id);
 
     let rows = sqlx::query_as::<_, AdminUserRow>(
-        "SELECT u.id, u.username, u.is_admin, u.created_at, \
+        "SELECT u.id, u.username, u.is_admin, u.disabled_at, u.created_at, \
                 COALESCE(v.votes, 0) AS votes_cast, \
                 COALESCE(s.matchups, 0) AS matchups_seen, \
                 v.last_vote_at, \
@@ -334,9 +349,23 @@ pub async fn ranking(
     let limit = query.limit.unwrap_or(50).clamp(1, 200);
     let offset = query.offset.unwrap_or(0).max(0);
     let search = query.q.unwrap_or_default().trim().to_string();
+    let genre = query
+        .genre
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
 
     Ok(Json(
-        load_chart(&state.db, &playlist, limit, offset, &search).await?,
+        load_chart(
+            &state.db,
+            &playlist,
+            limit,
+            offset,
+            &search,
+            query.decade,
+            genre.as_deref(),
+            query.artist,
+        )
+        .await?,
     ))
 }
 
@@ -471,6 +500,12 @@ pub async fn insights(
     _admin: AdminUser,
     Query(query): Query<InsightsQuery>,
 ) -> Result<Json<AdminInsights>, ApiError> {
+    let _permit = state
+        .heavy_work
+        .acquire()
+        .await
+        .map_err(|_| ApiError::service_unavailable("the server is busy; please try again"))?;
+
     let days = query.days.unwrap_or(14).clamp(1, 90);
     let playlist = active_playlist(&state.db).await?;
     let playlist_id = playlist.as_ref().map(|playlist| playlist.id);
@@ -766,12 +801,18 @@ pub async fn reset_votes(
     .execute(&mut *transaction)
     .await?;
 
-    sqlx::query("UPDATE playlists SET reveal_state = 'hidden' WHERE id = $1")
-        .bind(playlist.id)
-        .execute(&mut *transaction)
-        .await?;
+    sqlx::query(
+        "UPDATE playlists SET reveal_state = 'hidden', \
+                scheduled_reveal_at = NULL, \
+                pause_voting_on_reveal = FALSE \
+         WHERE id = $1",
+    )
+    .bind(playlist.id)
+    .execute(&mut *transaction)
+    .await?;
 
     transaction.commit().await?;
+    state.cache.clear();
 
     tracing::warn!(
         admin_id = %admin.0.id,
@@ -785,6 +826,102 @@ pub async fn reset_votes(
         reset: true,
         deleted_votes,
         deleted_matchups,
+    }))
+}
+
+pub async fn full_reset(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Json(payload): Json<FullResetRequest>,
+) -> Result<Json<FullResetResponse>, ApiError> {
+    if payload.confirm != "RESET EVERYTHING" {
+        return Err(ApiError::bad_request(
+            "type RESET EVERYTHING to confirm this destructive action",
+        ));
+    }
+
+    let mut transaction = state.db.begin().await?;
+
+    let deleted_votes = sqlx::query("DELETE FROM votes")
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+
+    let deleted_duels = sqlx::query("DELETE FROM seen_pairs")
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+
+    sqlx::query("DELETE FROM metadata_backfill_runs")
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM track_artists")
+        .execute(&mut *transaction)
+        .await?;
+
+    let deleted_tracks = sqlx::query("DELETE FROM tracks")
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+
+    let deleted_playlists = sqlx::query("DELETE FROM playlists")
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+
+    let deleted_artists = sqlx::query("DELETE FROM artists")
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+
+    let deleted_invites = sqlx::query("DELETE FROM invites")
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+
+    // OAuth states are disposable, but the connected Spotify account is
+    // infrastructure rather than season data. Keep its stored tokens so a full
+    // reset does not force the admin to reconnect before starting the next tape.
+    sqlx::query("DELETE FROM spotify_oauth_states")
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM auth_events")
+        .execute(&mut *transaction)
+        .await?;
+
+    let deleted_users = sqlx::query("DELETE FROM users WHERE id <> $1")
+        .bind(admin.0.id)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+
+    transaction.commit().await?;
+    state.cache.clear();
+    state.auth_cache.clear();
+
+    tracing::warn!(
+        admin_id = %admin.0.id,
+        deleted_users,
+        deleted_invites,
+        deleted_playlists,
+        deleted_tracks,
+        deleted_votes,
+        deleted_duels,
+        deleted_artists,
+        "FULL RESET completed"
+    );
+
+    Ok(Json(FullResetResponse {
+        reset: true,
+        deleted_users,
+        deleted_invites,
+        deleted_playlists,
+        deleted_tracks,
+        deleted_votes,
+        deleted_duels,
+        deleted_artists,
     }))
 }
 
@@ -826,6 +963,7 @@ pub async fn remove_playlist(
         .await?;
 
     transaction.commit().await?;
+    state.cache.clear();
 
     tracing::warn!(
         admin_id = %admin.0.id,

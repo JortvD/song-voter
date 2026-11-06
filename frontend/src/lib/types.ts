@@ -25,6 +25,16 @@ export type Playlist = {
   imported_at: string
   reveal_state: 'hidden' | 'revealed'
   is_active: boolean
+  scheduled_start_at: string | null
+  started_at: string | null
+  voting_paused: boolean
+  voting_paused_at: string | null
+  scheduled_reveal_at: string | null
+  pause_voting_on_reveal: boolean
+  start_error: string | null
+  start_attempts: number
+  last_start_attempt_at: string | null
+  start_in_progress: boolean
 }
 
 export type Track = {
@@ -37,6 +47,16 @@ export type Track = {
   album_image_url: string | null
   preview_url: string | null
   duration_ms: number | null
+  release_date: string | null
+  release_date_precision: string | null
+  release_year: number | null
+  decade: number | null
+  album_id: string | null
+  album_type: string | null
+  total_tracks: number | null
+  disc_number: number | null
+  track_number: number | null
+  primary_genre: string | null
   position: number
   rating: number
   comparisons: number
@@ -54,6 +74,28 @@ export type ImportSummary = {
   skipped_tracks: number
   total_tracks: number
   previews_missing: number
+  metadata_backfill_started: boolean
+}
+
+export type MetadataBackfillRun = {
+  id: string
+  status: 'running' | 'completed' | 'failed'
+  total_tracks: number
+  processed_tracks: number
+  total_artists: number
+  processed_artists: number
+  started_at: string
+  finished_at: string | null
+  error: string | null
+}
+
+export type MetadataStatus = {
+  playlist_id: string | null
+  tracks_total: number
+  tracks_with_year: number
+  tracks_with_genre: number
+  artists_total: number
+  latest_run: MetadataBackfillRun | null
 }
 
 export type TracksPage = {
@@ -80,6 +122,31 @@ export type MatchupTrack = {
   album_image_url: string | null
   preview_url: string | null
   duration_ms: number | null
+  release_year: number | null
+  decade: number | null
+  album_id: string | null
+  album_type: string | null
+  total_tracks: number | null
+  disc_number: number | null
+  track_number: number | null
+  primary_genre: string | null
+}
+
+export type StreakDay = {
+  date: string
+  picks: number
+  met: boolean
+  is_today: boolean
+}
+
+export type StreakSummary = {
+  current: number
+  longest: number
+  today_picks: number
+  goal: number
+  today_met: boolean
+  at_risk: boolean
+  days: StreakDay[]
 }
 
 export type Matchup = {
@@ -91,6 +158,8 @@ export type Matchup = {
   tracks_seen: number
   total_tracks: number
   votes_cast: number
+  recent_duels: DuelHistoryItem[]
+  streak: StreakSummary
 }
 
 export type VoteResponse = {
@@ -113,6 +182,30 @@ export type UndoResponse = {
   compared_pairs: number
   tracks_seen: number
   votes_cast: number
+  recent_duels: DuelHistoryItem[]
+  streak: StreakSummary
+}
+
+export type DuelHistoryItem = {
+  track_a: MatchupTrack
+  track_b: MatchupTrack
+  picked_track_id: string | null
+  seen_at: string
+  picked_at: string | null
+}
+
+export type DuelHistoryStatus = 'all' | 'picked' | 'skipped'
+
+export type DuelHistoryPage = {
+  playlist_id: string
+  playlist_name: string
+  total: number
+  picked: number
+  skipped: number
+  filtered_total: number
+  limit: number
+  offset: number
+  duels: DuelHistoryItem[]
 }
 
 export type PersonalRankedTrack = {
@@ -127,10 +220,46 @@ export type PersonalRanking = {
   playlist_id: string
   playlist_name: string
   total: number
+  ranked_total: number
+  top_score: number | null
   votes: number
   limit: number
   offset: number
+  decades: FacetCount[]
+  genres: FacetCount[]
+  artists: ArtistFacet[]
   tracks: PersonalRankedTrack[]
+}
+
+export type PersonalSummaryTrack = {
+  id: string
+  title: string
+  artists: string
+  album_image_url: string | null
+  rating: number
+  comparisons: number
+  wins: number
+}
+
+export type PersonalSummary = {
+  playlist_id: string
+  playlist_name: string
+  votes: number
+  total: number
+  top_track: PersonalSummaryTrack | null
+  streak: StreakSummary
+}
+
+export type FacetCount = {
+  value: string
+  count: number
+  average_rating: number | null
+}
+
+export type ArtistFacet = {
+  id: string
+  name: string
+  count: number
 }
 
 export type ChartStatus = {
@@ -144,6 +273,39 @@ export type ChartStatus = {
   votes_cast: number
   voters: number
   duels: number
+  total_artists: number
+  total_albums: number
+  year_min: number | null
+  year_max: number | null
+  scheduled_start_at: string | null
+  started_at: string | null
+  voting_paused: boolean
+  voting_paused_at: string | null
+  scheduled_reveal_at: string | null
+  pause_voting_on_reveal: boolean
+  decades: FacetCount[]
+  genres: FacetCount[]
+  artists: ArtistFacet[]
+}
+
+export type FullResetResult = {
+  reset: boolean
+  deleted_users: number
+  deleted_invites: number
+  deleted_playlists: number
+  deleted_tracks: number
+  deleted_votes: number
+  deleted_duels: number
+  deleted_artists: number
+}
+
+export type ChartFilters = {
+  limit?: number
+  offset?: number
+  q?: string
+  decade?: number | null
+  genre?: string | null
+  artist?: string | null
 }
 
 export type ChartEntry = {
@@ -162,7 +324,83 @@ export type PublicChart = {
   limit: number
   offset: number
   query: string
+  decade: number | null
+  genre: string | null
   tracks: ChartEntry[]
+}
+
+export type AggregateEntry = {
+  id: string
+  name: string
+  subtitle: string | null
+  image_url: string | null
+  genre: string | null
+  album_type: string | null
+  release_year: number | null
+  decade: number | null
+  track_count: number
+  rating: number
+  comparisons: number
+  wins: number
+}
+
+export type AggregateResponse = {
+  playlist_id: string
+  playlist_name: string
+  revealed: boolean
+  view: 'artists' | 'albums'
+  total: number
+  limit: number
+  offset: number
+  query: string
+  decade: number | null
+  genre: string | null
+  entries: AggregateEntry[]
+}
+
+export type StoryStat = {
+  label: string
+  value: string
+}
+
+export type StoryTrack = {
+  role: string
+  id: string
+  title: string
+  artists: string
+  album: string | null
+  album_image_url: string | null
+  rating: number
+}
+
+export type StoryCard = {
+  id: string
+  category: 'album' | 'artist' | 'decade' | 'duel' | 'tape'
+  eyebrow: string
+  title: string
+  subtitle: string | null
+  body: string
+  image_url: string | null
+  stats: StoryStat[]
+  tracks: StoryTrack[]
+}
+
+export type StoryLeaderboardRow = {
+  rank: number
+  title: string
+  subtitle: string | null
+  image_url: string | null
+  value: string
+  detail: string
+}
+
+export type StoryLeaderboard = {
+  id: string
+  category: 'album' | 'artist' | 'decade' | 'duel'
+  title: string
+  metric_label: string
+  detail_label: string
+  rows: StoryLeaderboardRow[]
 }
 
 export type ChartStories = {
@@ -177,6 +415,8 @@ export type ChartStories = {
     username: string
     picks: number
   } | null
+  cards: StoryCard[]
+  leaderboards: StoryLeaderboard[]
 }
 
 export type DailyVotes = {
@@ -203,6 +443,7 @@ export type AdminUserRow = {
   id: string
   username: string
   is_admin: boolean
+  disabled_at: string | null
   created_at: string
   votes_cast: number
   matchups_seen: number
@@ -218,6 +459,56 @@ export type AdminUsersPage = {
   query: string
   sort: string
   users: AdminUserRow[]
+}
+
+export type AdminDeleteUserResult = {
+  deleted: boolean
+  id: string
+  username: string
+  deleted_votes: number
+  deleted_duels: number
+  rebuilt_playlists: number
+  votes_replayed: number
+  tracks_updated: number
+}
+
+export type AdminClearVotesResult = {
+  cleared: boolean
+  id: string
+  username: string
+  playlist_id: string
+  playlist_name: string
+  deleted_votes: number
+  deleted_duels: number
+  votes_replayed: number
+  tracks_updated: number
+}
+
+export type AdminRenameUserResult = {
+  updated: boolean
+  id: string
+  username: string
+}
+
+export type AdminResetPasswordResult = {
+  updated: boolean
+  id: string
+  username: string
+  signed_out: boolean
+}
+
+export type AdminSetDisabledResult = {
+  updated: boolean
+  id: string
+  username: string
+  disabled: boolean
+  signed_out: boolean
+}
+
+export type AdminForceLogoutResult = {
+  signed_out: boolean
+  id: string
+  username: string
 }
 
 export type AdminHourlyPicks = {
@@ -262,6 +553,12 @@ export type AdminDailyVotes = {
   date: string
   votes: number
   voters: number
+}
+
+export type AdminSettings = {
+  daily_streak_goal: number
+  min: number
+  max: number
 }
 
 export type AdminInsights = {

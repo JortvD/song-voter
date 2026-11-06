@@ -70,8 +70,30 @@ impl IntoResponse for ApiError {
     }
 }
 
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BadRequest(message)
+            | Self::Unauthorized(message)
+            | Self::Forbidden(message)
+            | Self::NotFound(message)
+            | Self::Conflict(message)
+            | Self::TooManyRequests(message)
+            | Self::ServiceUnavailable(message) => formatter.write_str(message),
+            Self::Internal(error) => write!(formatter, "{error:#}"),
+        }
+    }
+}
+
 impl From<sqlx::Error> for ApiError {
     fn from(error: sqlx::Error) -> Self {
+        if matches!(error, sqlx::Error::PoolTimedOut) {
+            tracing::warn!("database connection pool timed out");
+            return Self::ServiceUnavailable(
+                "the server is busy right now; please try again".to_string(),
+            );
+        }
+
         Self::Internal(error.into())
     }
 }

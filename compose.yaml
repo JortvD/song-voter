@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-ulltop2000}
       POSTGRES_USER: ${POSTGRES_USER:-ulltop2000}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ulltop2000}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}"
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
@@ -15,6 +15,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # Not published: only the backend needs to reach it.
 
   backend:
@@ -29,7 +34,7 @@ services:
       APP_ENV: ${APP_ENV:-production}
       HOST: 0.0.0.0
       PORT: 8080
-      DATABASE_URL: postgres://${POSTGRES_USER:-ulltop2000}:${POSTGRES_PASSWORD:-ulltop2000}@db:5432/${POSTGRES_DB:-ulltop2000}
+      DATABASE_URL: "postgres://${POSTGRES_USER:-ulltop2000}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-ulltop2000}"
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RUST_LOG: ${RUST_LOG:-}
       AUTH_LOGIN_RATE_LIMIT: ${AUTH_LOGIN_RATE_LIMIT:-30}
@@ -52,6 +57,11 @@ services:
       timeout: 3s
       retries: 5
       start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   db_data:

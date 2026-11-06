@@ -7,6 +7,7 @@ export type AdminSection =
   | 'playlist'
   | 'reveal'
   | 'invites'
+  | 'settings'
   | 'runtime'
   | 'danger'
 
@@ -47,6 +48,7 @@ const items: Array<{
     label: 'Invites',
     hint: (insights) => (insights ? `${insights.invites_open} open` : '—'),
   },
+  { id: 'settings', label: 'Settings', hint: () => 'League rules' },
   { id: 'runtime', label: 'Runtime', hint: () => 'Health' },
   { id: 'danger', label: 'Danger zone', hint: () => 'Careful' },
 ]

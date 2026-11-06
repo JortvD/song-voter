@@ -3,7 +3,9 @@ use std::env;
 use anyhow::Context;
 use uuid::Uuid;
 
-use crate::spotify::{DEFAULT_ACCOUNTS_BASE, DEFAULT_API_BASE, DEFAULT_AUTHORIZE_URL, DEFAULT_EMBED_BASE};
+use crate::spotify::{
+    DEFAULT_ACCOUNTS_BASE, DEFAULT_API_BASE, DEFAULT_AUTHORIZE_URL, DEFAULT_EMBED_BASE,
+};
 
 /// Runtime configuration, entirely sourced from environment variables.
 #[derive(Clone, Debug)]
@@ -33,15 +35,42 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
-        let environment = env::var("APP_ENV").unwrap_or_else(|_| "development".into());
+        let environment = env::var("APP_ENV")
+            .unwrap_or_else(|_| "development".into())
+            .trim()
+            .to_ascii_lowercase();
+        let production = environment == "production";
 
         let database_url =
             env::var("DATABASE_URL").context("DATABASE_URL must be set (see .env.example)")?;
+
+        if production && looks_like_placeholder(&database_url) {
+            anyhow::bail!(
+                "DATABASE_URL still contains an example password; set POSTGRES_PASSWORD in .env \
+                 to a strong value before running in production"
+            );
+        }
 
         let (jwt_secret, jwt_secret_was_generated) = match non_empty("JWT_SECRET") {
             Some(secret) => (secret, false),
             None => (Uuid::new_v4().simple().to_string(), true),
         };
+
+        if production {
+            anyhow::ensure!(
+                !jwt_secret_was_generated,
+                "JWT_SECRET must be set in production; generate one with `openssl rand -hex 32`"
+            );
+            anyhow::ensure!(
+                !looks_like_placeholder(&jwt_secret),
+                "JWT_SECRET still contains the example placeholder; generate a fresh one with \
+                 `openssl rand -hex 32`"
+            );
+            anyhow::ensure!(
+                jwt_secret.len() >= 32,
+                "JWT_SECRET must be at least 32 characters in production"
+            );
+        }
 
         let jwt_ttl_hours = match non_empty("JWT_TTL_HOURS") {
             Some(value) => value
@@ -78,6 +107,19 @@ impl Config {
             "AUTH_REGISTER_RATE_LIMIT must be positive"
         );
 
+        let admin_username = non_empty("ADMIN_USERNAME");
+        let admin_password = non_empty("ADMIN_PASSWORD");
+
+        if production {
+            if let Some(password) = admin_password.as_deref() {
+                anyhow::ensure!(
+                    !looks_like_placeholder(password) && password != "admin",
+                    "ADMIN_PASSWORD still uses an example or weak value; set a strong password \
+                     before running in production"
+                );
+            }
+        }
+
         Ok(Self {
             environment,
             host: env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into()),
@@ -87,16 +129,15 @@ impl Config {
                 .context("PORT must be a valid u16")?,
             database_url,
             log_filter: env::var("LOG_LEVEL").unwrap_or_else(|_| "info".into()),
-            frontend_dir: env::var("FRONTEND_DIR")
-                .unwrap_or_else(|_| "./frontend/dist".into()),
+            frontend_dir: env::var("FRONTEND_DIR").unwrap_or_else(|_| "./frontend/dist".into()),
             jwt_secret,
             jwt_secret_was_generated,
             jwt_ttl_hours,
             cookie_secure,
             login_rate_limit,
             register_rate_limit,
-            admin_username: non_empty("ADMIN_USERNAME"),
-            admin_password: non_empty("ADMIN_PASSWORD"),
+            admin_username,
+            admin_password,
             spotify_client_id: non_empty("SPOTIFY_CLIENT_ID"),
             spotify_client_secret: non_empty("SPOTIFY_CLIENT_SECRET"),
             spotify_api_base: non_empty("SPOTIFY_API_BASE")
@@ -123,10 +164,52 @@ fn non_empty(key: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+/// Reject the values shipped in `.env.example` so a copied file cannot silently
+/// run production with a known password or signing key.
+fn looks_like_placeholder(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+
+    lower.contains("change-me")
+        || lower.contains("changeme")
+        || lower.contains("replace-with")
+        || lower.contains("local-dev")
+        || lower.contains(":ulltop2000@")
+        || lower == "ulltop2000"
+        || lower == "admin"
+        || lower == "password"
+}
+
 fn parse_bool(value: &str) -> anyhow::Result<bool> {
     match value.to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Ok(true),
         "0" | "false" | "no" | "off" => Ok(false),
         other => anyhow::bail!("unrecognised boolean {other:?}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::looks_like_placeholder;
+
+    #[test]
+    fn rejects_example_and_weak_values() {
+        assert!(looks_like_placeholder("change-me"));
+        assert!(looks_like_placeholder("CHANGE-ME-run-openssl-rand-hex-32"));
+        assert!(looks_like_placeholder(
+            "postgres://user:change-me@localhost/app"
+        ));
+        assert!(looks_like_placeholder(
+            "postgres://user:ulltop2000@localhost/app"
+        ));
+        assert!(looks_like_placeholder("admin"));
+        assert!(looks_like_placeholder("password"));
+    }
+
+    #[test]
+    fn accepts_random_production_values() {
+        assert!(!looks_like_placeholder(
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        ));
+        assert!(!looks_like_placeholder("a-long-random-admin-password"));
     }
 }

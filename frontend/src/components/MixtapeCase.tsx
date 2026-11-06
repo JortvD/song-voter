@@ -5,6 +5,9 @@ type MixtapeCaseProps = {
   description?: string | null
   revealed?: boolean
   className?: string
+  songsLabel?: string
+  statusLabel?: string
+  showDescription?: boolean
 }
 
 export function MixtapeCase({
@@ -14,12 +17,15 @@ export function MixtapeCase({
   description,
   revealed = false,
   className = '',
+  songsLabel,
+  statusLabel,
+  showDescription = true,
 }: MixtapeCaseProps) {
   return (
     <div className={`pv-mixtape-case ${className}`}>
       <div className="pv-mixtape-top">
         <span>Side A</span>
-        <span>{trackCount > 0 ? `${trackCount} songs` : 'Blank tape'}</span>
+        <span>{songsLabel ?? (trackCount > 0 ? `${trackCount} songs` : 'Blank tape')}</span>
       </div>
 
       <div className="pv-mixtape-cover">
@@ -39,22 +45,24 @@ export function MixtapeCase({
         )}
 
         <span className="pv-sticker pv-sticker-paper pv-mixtape-sticker">
-          {trackCount === 0 ? 'Blank tape' : revealed ? 'Standings live' : 'Sealed'}
+          {statusLabel ??
+            (trackCount === 0 ? 'Blank tape' : revealed ? 'Standings live' : 'Sealed')}
         </span>
       </div>
 
       <h2 className="pv-mixtape-title">{title}</h2>
 
-      {description ? (
-        <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-muted">
-          {description}
-        </p>
-      ) : (
-        <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-muted">
-          A shared playlist, a stack of duels, and one group&apos;s taste on the
-          line.
-        </p>
-      )}
+      {showDescription &&
+        (description ? (
+          <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-muted">
+            {description}
+          </p>
+        ) : (
+          <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-muted">
+            A shared playlist, a stack of duels, and one group&apos;s taste on the
+            line.
+          </p>
+        ))}
 
       <div className="pv-mixtape-bottom">
         <span>Playlist Voter</span>

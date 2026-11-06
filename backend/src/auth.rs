@@ -43,6 +43,7 @@ impl AuthService {
             sub: user.id,
             username: user.username.clone(),
             is_admin: user.is_admin,
+            session_version: user.session_version,
             iat: now.timestamp(),
             exp: (now + ChronoDuration::hours(self.ttl_hours)).timestamp(),
         };
@@ -82,13 +83,22 @@ pub struct Claims {
     pub sub: Uuid,
     pub username: String,
     pub is_admin: bool,
+    /// Missing in tokens issued before session revocation existed.
+    #[serde(default)]
+    pub session_version: i64,
     pub iat: i64,
     pub exp: i64,
 }
 
-/// Authenticated user, loaded fresh from the database on every request so
-/// revoked accounts and role changes take effect immediately.
+/// Authenticated user.
+///
+/// The user row is cached for a very short time to keep high-volume voting
+/// paths off the database. Every admin action that disables an account or
+/// revokes sessions invalidates the entry, so revocation still takes effect
+/// on the next request in this process.
 pub struct AuthUser(pub User);
+
+const AUTH_USER_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
 
 impl FromRequestParts<AppState> for AuthUser {
     type Rejection = ApiError;
@@ -110,17 +120,47 @@ impl FromRequestParts<AppState> for AuthUser {
             ApiError::unauthorized("invalid or expired session")
         })?;
 
-        let user = sqlx::query_as::<_, User>(
-            "SELECT id, username, password_hash, is_admin, created_at \
-             FROM users WHERE id = $1",
-        )
-        .bind(claims.sub)
-        .fetch_optional(&state.db)
-        .await?
-        .ok_or_else(|| {
-            tracing::warn!(user_id = %claims.sub, "session refers to a missing user");
-            ApiError::unauthorized("invalid or expired session")
-        })?;
+        let cached = state.auth_cache.get(claims.sub);
+        let cache_hit = cached.is_some();
+        let user = match cached {
+            Some(user) => user,
+            None => sqlx::query_as::<_, User>(
+                // The session extractor never needs the password hash.
+                "SELECT id, username, ''::text AS password_hash, is_admin, created_at, \
+                        disabled_at, session_version \
+                 FROM users WHERE id = $1",
+            )
+            .bind(claims.sub)
+            .fetch_optional(&state.db)
+            .await?
+            .ok_or_else(|| {
+                tracing::warn!(user_id = %claims.sub, "session refers to a missing user");
+                ApiError::unauthorized("invalid or expired session")
+            })?,
+        };
+
+        // Check even cache hits: the row could have changed outside this
+        // process, and the check is cheap.
+        if user.disabled_at.is_some() {
+            tracing::warn!(user_id = %user.id, "session belongs to a disabled account");
+            return Err(ApiError::unauthorized("this account has been disabled"));
+        }
+
+        if claims.session_version != user.session_version {
+            tracing::warn!(
+                user_id = %user.id,
+                token_version = claims.session_version,
+                current_version = user.session_version,
+                "session has been revoked"
+            );
+            return Err(ApiError::unauthorized(
+                "this session has been signed out; sign in again",
+            ));
+        }
+
+        if !cache_hit {
+            state.auth_cache.insert(user.clone(), AUTH_USER_CACHE_TTL);
+        }
 
         Ok(Self(user))
     }
@@ -299,6 +339,8 @@ mod tests {
             password_hash: "unused".into(),
             is_admin: true,
             created_at: Utc::now(),
+            disabled_at: None,
+            session_version: 0,
         };
 
         let token = service.issue_token(&user).unwrap();

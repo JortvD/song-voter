@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { AdminSectionHeader } from './AdminSectionHeader'
 import type { AdminSection } from './AdminNav'
+import { StoryCardGrid, StoryLeaderboards } from '../StoryCards'
 import { api } from '../../lib/api'
 import type { AdminInsights, ChartStories } from '../../lib/types'
 
@@ -539,66 +540,100 @@ function RecentPicksPanel({ data }: { data: AdminInsights['recent_picks'] }) {
 }
 
 function StoriesPanel({ stories }: { stories: ChartStories | null }) {
+  const hasStories = Boolean(
+    stories &&
+      (stories.most_duelled ||
+        stories.top_voter ||
+        stories.cards.length > 0 ||
+        stories.leaderboards.length > 0),
+  )
+
   return (
     <div className="pv-admin-panel">
       <p className="pv-admin-label">Liner notes</p>
       <h3 className="font-serif text-xl text-ink">The stories</h3>
 
-      {!stories || (!stories.most_duelled && !stories.top_voter) ? (
+      {!hasStories || !stories ? (
         <p className="mt-4 text-sm text-muted">
           The stories will appear once there are enough picks.
         </p>
       ) : (
-        <div className="mt-3 space-y-3">
-          {stories.most_duelled && (
-            <div className="rounded-xl border border-line bg-paper p-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="pv-admin-chip">Most duelled</span>
-                <span className="font-mono text-[8px] uppercase tracking-[0.12em] text-muted">
-                  {formatNumber(stories.most_duelled.comparisons)} duels
-                </span>
-              </div>
-              <div className="mt-2 flex items-center gap-2.5">
-                <TrackCover
-                  src={stories.most_duelled.track.album_image_url}
-                  alt=""
-                />
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-ink">
-                    {stories.most_duelled.track.title}
-                  </p>
-                  <p className="truncate font-mono text-[9px] uppercase tracking-[0.1em] text-muted">
-                    {stories.most_duelled.track.artists}
-                  </p>
+        <>
+          <div className="mt-3 space-y-3">
+            {stories.most_duelled && (
+              <div className="rounded-xl border border-line bg-paper p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="pv-admin-chip">Most duelled</span>
+                  <span className="font-mono text-[8px] uppercase tracking-[0.12em] text-muted">
+                    {formatNumber(stories.most_duelled.comparisons)} duels
+                  </span>
+                </div>
+                <div className="mt-2 flex items-center gap-2.5">
+                  <TrackCover
+                    src={stories.most_duelled.track.album_image_url}
+                    alt=""
+                  />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-ink">
+                      {stories.most_duelled.track.title}
+                    </p>
+                    <p className="truncate font-mono text-[9px] uppercase tracking-[0.1em] text-muted">
+                      {stories.most_duelled.track.artists}
+                    </p>
+                  </div>
                 </div>
               </div>
+            )}
+
+            {stories.top_voter && (
+              <div className="rounded-xl border border-line bg-paper p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="pv-admin-chip">Top voter</span>
+                  <span className="font-mono text-[8px] uppercase tracking-[0.12em] text-muted">
+                    {formatNumber(stories.top_voter.picks)} picks
+                  </span>
+                </div>
+                <div className="mt-2 flex items-center gap-2.5">
+                  <span className="grid size-9 place-items-center rounded-full border border-line bg-ink/10 font-serif text-lg text-ink">
+                    {stories.top_voter.username.slice(0, 1).toUpperCase()}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-ink">
+                      {stories.top_voter.username}
+                    </p>
+                    <p className="font-mono text-[9px] uppercase tracking-[0.1em] text-muted">
+                      Most active listener
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {stories.cards.length > 0 && (
+            <div className="mt-4">
+              <div className="flex items-end justify-between gap-2 border-b border-line pb-1">
+                <p className="pv-admin-label">Superlatives</p>
+                <span className="font-mono text-[8px] uppercase tracking-[0.12em] text-muted">
+                  {stories.cards.length} cards
+                </span>
+              </div>
+              <StoryCardGrid cards={stories.cards} />
             </div>
           )}
 
-          {stories.top_voter && (
-            <div className="rounded-xl border border-line bg-paper p-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="pv-admin-chip">Top voter</span>
+          {stories.leaderboards.length > 0 && (
+            <div className="mt-4">
+              <div className="flex items-end justify-between gap-2 border-b border-line pb-1">
+                <p className="pv-admin-label">Top 5 leaderboards</p>
                 <span className="font-mono text-[8px] uppercase tracking-[0.12em] text-muted">
-                  {formatNumber(stories.top_voter.picks)} picks
+                  {stories.leaderboards.length} lists
                 </span>
               </div>
-              <div className="mt-2 flex items-center gap-2.5">
-                <span className="grid size-9 place-items-center rounded-full border border-line bg-ink/10 font-serif text-lg text-ink">
-                  {stories.top_voter.username.slice(0, 1).toUpperCase()}
-                </span>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-ink">
-                    {stories.top_voter.username}
-                  </p>
-                  <p className="font-mono text-[9px] uppercase tracking-[0.1em] text-muted">
-                    Most active listener
-                  </p>
-                </div>
-              </div>
+              <StoryLeaderboards leaderboards={stories.leaderboards} />
             </div>
           )}
-        </div>
+        </>
       )}
     </div>
   )
@@ -791,10 +826,8 @@ export function AdminOverview({
         <TopVotersPanel data={insights.top_voters} onNavigate={onNavigate} />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <RecentPicksPanel data={insights.recent_picks} />
-        <StoriesPanel stories={stories} />
-      </div>
+      <RecentPicksPanel data={insights.recent_picks} />
+      <StoriesPanel stories={stories} />
     </div>
   )
 }

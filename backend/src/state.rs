@@ -2,8 +2,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use sqlx::PgPool;
+use tokio::sync::Semaphore;
 
 use crate::auth::AuthService;
+use crate::cache::{AuthUserCache, ResponseCache};
 use crate::rate_limit::RateLimiter;
 use crate::spotify::SpotifyClient;
 
@@ -19,4 +21,10 @@ pub struct AppState {
     pub register_rate_limit: u32,
     pub started_at: Instant,
     pub environment: String,
+    /// Cached public aggregates with per-key single-flight.
+    pub cache: Arc<ResponseCache>,
+    /// Short-lived authenticated user cache; invalidated on admin changes.
+    pub auth_cache: Arc<AuthUserCache>,
+    /// Caps concurrent heavy analytics queries so they cannot starve votes.
+    pub heavy_work: Arc<Semaphore>,
 }

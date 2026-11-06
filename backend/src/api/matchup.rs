@@ -1,16 +1,23 @@
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::Json;
 use serde::Serialize;
 use uuid::Uuid;
 
+use crate::api::history::{recent_picked, DuelHistoryItem, RECENT_DUEL_LIMIT};
+use crate::api::streak::{load_streak, StreakQuery, StreakSummary};
 use crate::auth::AuthUser;
-use crate::db::{active_playlist, user_progress};
+use crate::db::{active_playlist, user_progress, voting_block_reason};
 use crate::error::ApiError;
 use crate::models::MatchupTrack;
 use crate::state::AppState;
 
 /// How many of the least-compared tracks are considered for a new matchup.
-const CANDIDATE_POOL: i64 = 100;
+/// 40 keeps the pair search at 780 combinations instead of 4,950 for a
+/// hundred-track pool, while still giving every voter plenty of variety.
+const CANDIDATE_POOL: i64 = 40;
+/// Randomise within a slightly wider slice so not every voter sees exactly
+/// the same small group of tracks.
+const CANDIDATE_SAMPLE: i64 = 200;
 const MAX_INSERT_ATTEMPTS: u32 = 3;
 
 #[derive(Debug, Serialize)]
@@ -23,6 +30,8 @@ pub struct MatchupResponse {
     tracks_seen: i64,
     total_tracks: i64,
     votes_cast: i64,
+    recent_duels: Vec<DuelHistoryItem>,
+    streak: StreakSummary,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -41,12 +50,17 @@ struct PairRow {
 pub async fn next(
     State(state): State<AppState>,
     user: AuthUser,
+    Query(query): Query<StreakQuery>,
 ) -> Result<Json<MatchupResponse>, ApiError> {
     let Some(playlist) = active_playlist(&state.db).await? else {
         return Err(ApiError::NotFound(
             "no active playlist has been imported yet".to_string(),
         ));
     };
+
+    if let Some(reason) = voting_block_reason(&playlist) {
+        return Err(ApiError::Conflict(reason));
+    }
 
     let total_tracks =
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tracks WHERE playlist_id = $1")
@@ -67,6 +81,7 @@ pub async fn next(
             .bind(playlist.id)
             .bind(user.0.id)
             .bind(CANDIDATE_POOL)
+            .bind(CANDIDATE_SAMPLE)
             .fetch_optional(&mut *transaction)
             .await?;
 
@@ -83,13 +98,15 @@ pub async fn next(
         };
 
         let inserted = sqlx::query(
-            "INSERT INTO seen_pairs (user_id, playlist_id, track_low, track_high) \
-             VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
+            "INSERT INTO seen_pairs \
+                (user_id, playlist_id, track_low, track_high, served_flip) \
+             VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
         )
         .bind(user.0.id)
         .bind(playlist.id)
         .bind(pair.low_id)
         .bind(pair.high_id)
+        .bind(pair.flip)
         .execute(&mut *transaction)
         .await?;
 
@@ -113,28 +130,24 @@ pub async fn next(
             .iter()
             .find(|track| track.id == pair.low_id)
             .cloned()
-            .ok_or_else(|| {
-                ApiError::internal(anyhow::anyhow!("selected low track is missing"))
-            })?;
+            .ok_or_else(|| ApiError::internal(anyhow::anyhow!("selected low track is missing")))?;
         let high = tracks
             .iter()
             .find(|track| track.id == pair.high_id)
             .cloned()
-            .ok_or_else(|| {
-                ApiError::internal(anyhow::anyhow!("selected high track is missing"))
-            })?;
+            .ok_or_else(|| ApiError::internal(anyhow::anyhow!("selected high track is missing")))?;
 
         let progress = user_progress(&mut *transaction, user.0.id, playlist.id).await?;
+        let recent_duels =
+            recent_picked(&mut *transaction, user.0.id, playlist.id, RECENT_DUEL_LIMIT).await?;
+        let streak =
+            load_streak(&mut *transaction, user.0.id, query.tz.as_deref()).await?;
 
         transaction.commit().await?;
 
         // Randomise which track appears on the left so position gives no hint
         // about the internal (low/high) UUID ordering.
-        let (track_a, track_b) = if pair.flip {
-            (high, low)
-        } else {
-            (low, high)
-        };
+        let (track_a, track_b) = if pair.flip { (high, low) } else { (low, high) };
 
         tracing::debug!(
             user_id = %user.0.id,
@@ -158,6 +171,8 @@ pub async fn next(
             tracks_seen: progress.tracks_seen,
             total_tracks,
             votes_cast: progress.votes_cast,
+            recent_duels,
+            streak,
         }));
     }
 
@@ -172,11 +187,17 @@ pub async fn next(
 }
 
 const PAIR_SQL: &str = r#"
-WITH candidates AS (
+WITH least_compared AS (
     SELECT id, rating
     FROM tracks
     WHERE playlist_id = $1
-    ORDER BY comparisons ASC, last_compared_at ASC NULLS LAST, random()
+    ORDER BY comparisons ASC, last_compared_at ASC NULLS LAST
+    LIMIT $4
+),
+candidates AS (
+    SELECT id, rating
+    FROM least_compared
+    ORDER BY random()
     LIMIT $3
 ),
 unseen AS (
@@ -203,7 +224,9 @@ LIMIT 1
 "#;
 
 const TRACK_SQL: &str = r#"
-SELECT id, spotify_id, title, artists, album, album_image_url, preview_url, duration_ms
+SELECT id, spotify_id, title, artists, album, album_image_url, preview_url, duration_ms,
+       release_year, decade, album_id, album_type, total_tracks, disc_number,
+       track_number, primary_genre
 FROM tracks
 WHERE id = ANY($1)
 "#;

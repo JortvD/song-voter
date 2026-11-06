@@ -99,7 +99,8 @@ pub async fn register(
 
     let inserted = sqlx::query_as::<_, User>(
         "INSERT INTO users (username, password_hash) VALUES ($1, $2) \
-         RETURNING id, username, password_hash, is_admin, created_at",
+         RETURNING id, username, password_hash, is_admin, created_at, disabled_at, \
+                   session_version",
     )
     .bind(&username)
     .bind(&password_hash)
@@ -157,7 +158,10 @@ pub async fn register(
     );
 
     let token = state.auth.issue_token(&user)?;
-    Ok((CookieJar::new().add(state.auth.session_cookie(token)), Json(user)))
+    Ok((
+        CookieJar::new().add(state.auth.session_cookie(token)),
+        Json(user),
+    ))
 }
 
 pub async fn login(
@@ -173,11 +177,10 @@ pub async fn login(
     let (ip, user_agent) = client_info(&headers);
 
     let rate_key = format!("login:{}", ip.as_deref().unwrap_or("unknown"));
-    if !state.rate_limiter.allow(
-        &rate_key,
-        state.login_rate_limit,
-        Duration::from_secs(60),
-    ) {
+    if !state
+        .rate_limiter
+        .allow(&rate_key, state.login_rate_limit, Duration::from_secs(60))
+    {
         tracing::warn!(
             ip = ip.as_deref().unwrap_or("unknown"),
             "login rate limit exceeded"
@@ -188,7 +191,8 @@ pub async fn login(
     }
 
     let user = sqlx::query_as::<_, User>(
-        "SELECT id, username, password_hash, is_admin, created_at \
+        "SELECT id, username, password_hash, is_admin, created_at, disabled_at, \
+                session_version \
          FROM users WHERE lower(username) = lower($1)",
     )
     .bind(&username_input)
@@ -241,6 +245,29 @@ pub async fn login(
         return Err(ApiError::unauthorized("invalid username or password"));
     }
 
+    if user.disabled_at.is_some() {
+        audit::record(
+            &state.db,
+            AuthEvent {
+                user_id: Some(user.id),
+                username: Some(&user.username),
+                event: "login_failed",
+                detail: Some("account_disabled"),
+                ip: ip.as_deref(),
+                user_agent: user_agent.as_deref(),
+            },
+        )
+        .await;
+        tracing::warn!(
+            user_id = %user.id,
+            username = %user.username,
+            reason = "account_disabled",
+            ip = ip.as_deref().unwrap_or("unknown"),
+            "login failed"
+        );
+        return Err(ApiError::forbidden("this account has been disabled"));
+    }
+
     audit::record(
         &state.db,
         AuthEvent {
@@ -262,7 +289,10 @@ pub async fn login(
     );
 
     let token = state.auth.issue_token(&user)?;
-    Ok((CookieJar::new().add(state.auth.session_cookie(token)), Json(user)))
+    Ok((
+        CookieJar::new().add(state.auth.session_cookie(token)),
+        Json(user),
+    ))
 }
 
 pub async fn logout(

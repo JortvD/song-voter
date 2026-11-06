@@ -12,6 +12,12 @@ pub struct User {
     pub password_hash: String,
     pub is_admin: bool,
     pub created_at: DateTime<Utc>,
+    /// Disabled accounts may not sign in or use existing sessions.
+    #[serde(skip)]
+    pub disabled_at: Option<DateTime<Utc>>,
+    /// Incremented to revoke every session issued before the change.
+    #[serde(skip)]
+    pub session_version: i64,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize)]
@@ -36,6 +42,16 @@ pub struct Playlist {
     pub imported_at: DateTime<Utc>,
     pub reveal_state: String,
     pub is_active: bool,
+    pub scheduled_start_at: Option<DateTime<Utc>>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub voting_paused: bool,
+    pub voting_paused_at: Option<DateTime<Utc>>,
+    pub scheduled_reveal_at: Option<DateTime<Utc>>,
+    pub pause_voting_on_reveal: bool,
+    pub start_error: Option<String>,
+    pub start_attempts: i32,
+    pub last_start_attempt_at: Option<DateTime<Utc>>,
+    pub start_in_progress: bool,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize)]
@@ -49,6 +65,16 @@ pub struct Track {
     pub album_image_url: Option<String>,
     pub preview_url: Option<String>,
     pub duration_ms: Option<i32>,
+    pub release_date: Option<String>,
+    pub release_date_precision: Option<String>,
+    pub release_year: Option<i32>,
+    pub decade: Option<i32>,
+    pub album_id: Option<String>,
+    pub album_type: Option<String>,
+    pub total_tracks: Option<i32>,
+    pub disc_number: Option<i32>,
+    pub track_number: Option<i32>,
+    pub primary_genre: Option<String>,
     pub position: i32,
     pub rating: f64,
     pub comparisons: i32,
@@ -67,4 +93,12 @@ pub struct MatchupTrack {
     pub album_image_url: Option<String>,
     pub preview_url: Option<String>,
     pub duration_ms: Option<i32>,
+    pub release_year: Option<i32>,
+    pub decade: Option<i32>,
+    pub album_id: Option<String>,
+    pub album_type: Option<String>,
+    pub total_tracks: Option<i32>,
+    pub disc_number: Option<i32>,
+    pub track_number: Option<i32>,
+    pub primary_genre: Option<String>,
 }

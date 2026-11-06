@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 
+import { usePlaylist } from '../context/PlaylistContext'
 import { ApiError, api } from '../lib/api'
 import type {
   ImportSummary,
+  MetadataStatus,
   PlaylistOverview,
   SpotifyStatus,
   Track,
@@ -17,39 +19,76 @@ function formatDate(value: string): string {
   })
 }
 
+function formatDateTime(value: string | null): string {
+  if (!value) return '—'
+  return new Date(value).toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })
+}
+
+function localInputValue(value: string | null): string {
+  if (!value) return ''
+  const date = new Date(value)
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+  return local.toISOString().slice(0, 16)
+}
+
 function formatNumber(value: number): string {
   return value.toLocaleString()
 }
 
 export function AdminPlaylist() {
+  const { refresh: refreshPlaylist } = usePlaylist()
   const [overview, setOverview] = useState<PlaylistOverview | null>(null)
   const [spotify, setSpotify] = useState<SpotifyStatus | null>(null)
   const [tracks, setTracks] = useState<Track[]>([])
+  const [metadata, setMetadata] = useState<MetadataStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [input, setInput] = useState('')
+  const [startInput, setStartInput] = useState('')
   const [importing, setImporting] = useState(false)
+  const [scheduling, setScheduling] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const [scheduleNotice, setScheduleNotice] = useState<string | null>(null)
   const [backfilling, setBackfilling] = useState(false)
+  const [metadataStarting, setMetadataStarting] = useState(false)
   const [previewNotice, setPreviewNotice] = useState<string | null>(null)
+  const [metadataNotice, setMetadataNotice] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [noticeTone, setNoticeTone] = useState<'ok' | 'error'>('ok')
   const [result, setResult] = useState<ImportSummary | null>(null)
+  const [resultMode, setResultMode] = useState<'import' | 'resync'>('import')
+  const [syncing, setSyncing] = useState(false)
+
+  const playlist = overview?.playlist ?? null
 
   const load = useCallback(async () => {
-    const [data, status] = await Promise.all([
+    const [data, status, metadataStatus] = await Promise.all([
       api.getPlaylist(),
       api.getSpotifyStatus(),
+      api.getMetadataStatus(),
     ])
     setOverview(data)
     setSpotify(status)
+    setMetadata(metadataStatus)
 
     if (data.playlist) {
-      const page = await api.getTracks(6)
-      setTracks(page.tracks)
+      setInput(data.playlist.spotify_id)
+      setStartInput(localInputValue(data.playlist.scheduled_start_at))
+      if (data.playlist.started_at) {
+        const page = await api.getTracks(6)
+        setTracks(page.tracks)
+      } else {
+        setTracks([])
+      }
     } else {
       setTracks([])
+      setInput('')
+      setStartInput('')
     }
   }, [])
 
@@ -70,6 +109,43 @@ export function AdminPlaylist() {
       active = false
     }
   }, [load])
+
+  useEffect(() => {
+    const playlist = overview?.playlist
+    if (!playlist || playlist.started_at) return
+
+    const timer = window.setInterval(() => {
+      api
+        .getPlaylist()
+        .then(async (next) => {
+          if (next.playlist?.started_at) {
+            await load()
+          } else {
+            setOverview(next)
+          }
+        })
+        .catch(() => {
+          // Keep the last known schedule; the manual refresh still works.
+        })
+    }, 15_000)
+
+    return () => window.clearInterval(timer)
+  }, [overview?.playlist?.started_at, load])
+
+  useEffect(() => {
+    if (metadata?.latest_run?.status !== 'running') return
+
+    const timer = window.setInterval(() => {
+      api
+        .getMetadataStatus()
+        .then((next) => setMetadata(next))
+        .catch(() => {
+          // Keep the last known progress; the manual refresh still works.
+        })
+    }, 2500)
+
+    return () => window.clearInterval(timer)
+  }, [metadata?.latest_run?.status])
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -93,22 +169,133 @@ export function AdminPlaylist() {
     )
   }, [])
 
-  async function handleImport(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  async function startNow() {
+    if (!input.trim() || importing) return
     setImporting(true)
     setError(null)
     setResult(null)
     setPreviewNotice(null)
+    setScheduleNotice(null)
 
     try {
       const summary = await api.importPlaylist(input.trim())
+      setResultMode('import')
       setResult(summary)
-      setInput('')
+      await refreshPlaylist()
       await load()
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'Import failed')
     } finally {
       setImporting(false)
+    }
+  }
+
+  async function resyncPlaylist() {
+    if (!playlist || syncing) return
+
+    const confirmed = window.confirm(
+      'Re-sync this Spotify playlist? Tracks and metadata will be refreshed; existing picks, duels and scores are preserved.',
+    )
+    if (!confirmed) return
+
+    setSyncing(true)
+    setError(null)
+    setResult(null)
+    setPreviewNotice(null)
+    setScheduleNotice(null)
+
+    try {
+      const summary = await api.importPlaylist(playlist.spotify_id)
+      setResultMode('resync')
+      setResult(summary)
+      await refreshPlaylist()
+      await load()
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Re-sync failed')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  async function schedulePlaylist(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!input.trim() || !startInput || scheduling) return
+
+    const startAt = new Date(startInput)
+    if (Number.isNaN(startAt.getTime())) {
+      setError('Choose a valid start date and time')
+      return
+    }
+
+    setScheduling(true)
+    setError(null)
+    setScheduleNotice(null)
+    setResult(null)
+
+    try {
+      const playlist = await api.schedulePlaylist(input.trim(), startAt.toISOString())
+      setScheduleNotice(
+        `Scheduled for ${formatDateTime(
+          playlist?.scheduled_start_at ?? startAt.toISOString(),
+        )}. Songs will be fetched when voting starts.`,
+      )
+      await refreshPlaylist()
+      await load()
+    } catch (caught) {
+      setError(
+        caught instanceof ApiError
+          ? caught.message
+          : 'Could not schedule the playlist',
+      )
+    } finally {
+      setScheduling(false)
+    }
+  }
+
+  async function startScheduled() {
+    if (starting) return
+    setStarting(true)
+    setError(null)
+    setResult(null)
+    setScheduleNotice(null)
+
+    try {
+      const summary = await api.startPlaylistNow()
+      setResultMode('import')
+      setResult(summary)
+      await refreshPlaylist()
+      await load()
+    } catch (caught) {
+      setError(
+        caught instanceof ApiError
+          ? caught.message
+          : 'Could not start the playlist',
+      )
+    } finally {
+      setStarting(false)
+    }
+  }
+
+  async function cancelSchedule() {
+    if (starting) return
+    setStarting(true)
+    setError(null)
+    setResult(null)
+    setScheduleNotice(null)
+
+    try {
+      await api.cancelScheduledPlaylist()
+      setScheduleNotice('Scheduled playlist cancelled.')
+      await refreshPlaylist()
+      await load()
+    } catch (caught) {
+      setError(
+        caught instanceof ApiError
+          ? caught.message
+          : 'Could not cancel the scheduled playlist',
+      )
+    } finally {
+      setStarting(false)
     }
   }
 
@@ -128,6 +315,30 @@ export function AdminPlaylist() {
       setError(caught instanceof ApiError ? caught.message : 'Could not start the preview fetch')
     } finally {
       setBackfilling(false)
+    }
+  }
+
+  async function runMetadataBackfill() {
+    setMetadataStarting(true)
+    setError(null)
+    setMetadataNotice(null)
+
+    try {
+      const response = await api.backfillMetadata()
+      setMetadata(await api.getMetadataStatus())
+      setMetadataNotice(
+        response.started
+          ? 'Backfilling release years, albums and genres in the background.'
+          : 'A metadata backfill is already running.',
+      )
+    } catch (caught) {
+      setError(
+        caught instanceof ApiError
+          ? caught.message
+          : 'Could not start the metadata backfill',
+      )
+    } finally {
+      setMetadataStarting(false)
     }
   }
 
@@ -159,8 +370,6 @@ export function AdminPlaylist() {
       setDisconnecting(false)
     }
   }
-
-  const playlist = overview?.playlist ?? null
 
   return (
     <section className="panel">
@@ -253,14 +462,60 @@ export function AdminPlaylist() {
                 <div className="min-w-0">
                   <p className="truncate font-serif text-xl leading-tight">{playlist.name}</p>
                   <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted">
-                    {formatNumber(overview?.track_count ?? 0)} tracks
+                    {playlist.started_at === null
+                      ? 'Not loaded yet'
+                      : `${formatNumber(overview?.track_count ?? 0)} tracks`}
                     {playlist.owner_name ? ` / ${playlist.owner_name}` : ''}
                   </p>
                   <p className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
-                    Imported {formatDate(playlist.imported_at)}
+                    {playlist.started_at === null
+                      ? `Set ${formatDate(playlist.imported_at)} · opens ${formatDateTime(playlist.scheduled_start_at)}`
+                      : `Started ${formatDateTime(playlist.started_at)}`}
                   </p>
+                  {playlist.voting_paused && (
+                    <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.14em] text-danger">
+                      Voting paused
+                    </p>
+                  )}
                 </div>
               </div>
+
+              {playlist.started_at === null && (
+                <div className="mt-4 border border-line bg-paper p-3">
+                  <p className="label">Scheduled start</p>
+                  <p className="mt-1 text-sm text-muted">
+                    Voting opens at {formatDateTime(playlist.scheduled_start_at)}. The
+                    song list is fetched then, so late additions are included.
+                  </p>
+                  {playlist.start_error && (
+                    <p className="mt-2 break-words border-l-2 border-danger bg-danger/5 px-2 py-1 text-xs text-danger">
+                      Last attempt: {playlist.start_error}
+                    </p>
+                  )}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void startScheduled()}
+                      disabled={starting || playlist.start_in_progress}
+                      className="btn"
+                    >
+                      {playlist.start_in_progress
+                        ? 'Starting…'
+                        : starting
+                          ? 'Starting…'
+                          : 'Start now'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void cancelSchedule()}
+                      disabled={starting || playlist.start_in_progress}
+                      className="btn-ghost"
+                    >
+                      Cancel schedule
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {tracks.length > 0 && (
                 <ol className="mt-4 border-t border-line">
@@ -292,12 +547,16 @@ export function AdminPlaylist() {
 
         {result && (
           <p className="mt-4 border-l-2 border-ok bg-ok/5 px-3 py-2 text-xs text-ok">
-            {formatNumber(result.total_tracks)} tracks imported
+            {formatNumber(result.total_tracks)} tracks{' '}
+            {resultMode === 'resync' ? 'synced' : 'imported'}
             {result.skipped_tracks > 0
               ? ` — ${formatNumber(result.skipped_tracks)} unavailable items skipped`
               : ''}
             {result.previews_missing > 0
               ? ` — fetching ${formatNumber(result.previews_missing)} previews in the background`
+              : ''}
+            {result.metadata_backfill_started
+              ? ' — metadata backfill queued'
               : ''}
             .
           </p>
@@ -309,51 +568,186 @@ export function AdminPlaylist() {
           </p>
         )}
 
+        {metadata && metadata.tracks_total > 0 && (() => {
+          const run = metadata.latest_run
+          const running = run?.status === 'running'
+          const percent =
+            run && run.total_tracks > 0
+              ? Math.min(
+                  100,
+                  Math.round(
+                    (Math.min(run.processed_tracks, run.total_tracks) /
+                      run.total_tracks) *
+                      100,
+                  ),
+                )
+              : 0
+
+          return (
+            <div className="mt-4 border border-line bg-paper p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="label">Metadata</p>
+                  <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.12em] text-muted">
+                    {formatNumber(metadata.tracks_with_year)}/
+                    {formatNumber(metadata.tracks_total)} with release year ·{' '}
+                    {formatNumber(metadata.tracks_with_genre)}/
+                    {formatNumber(metadata.tracks_total)} with genre ·{' '}
+                    {formatNumber(metadata.artists_total)} artists
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void runMetadataBackfill()}
+                  disabled={metadataStarting || running}
+                  className="btn-ghost shrink-0"
+                >
+                  {running
+                    ? 'Backfilling…'
+                    : metadataStarting
+                      ? 'Starting…'
+                      : 'Backfill metadata'}
+                </button>
+              </div>
+
+              {run?.status === 'completed' && metadata.tracks_with_genre === 0 && (
+                <p className="mt-2 border-l-2 border-line px-2 py-1 text-[11px] text-muted">
+                  Spotify returned no artist genres. Release and album metadata are
+                  still saved; genre facets stay hidden until genres are available.
+                </p>
+              )}
+
+              {run && (
+                <div className="mt-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[9px] uppercase tracking-[0.12em] text-muted">
+                    <span
+                      className={
+                        run.status === 'failed'
+                          ? 'text-danger'
+                          : run.status === 'completed'
+                            ? 'text-ok'
+                            : 'text-ink'
+                      }
+                    >
+                      {run.status} · {formatNumber(run.processed_tracks)}/
+                      {formatNumber(run.total_tracks)} tracks ·{' '}
+                      {formatNumber(run.processed_artists)}/
+                      {formatNumber(run.total_artists)} artists
+                    </span>
+                    <span>{percent}%</span>
+                  </div>
+                  <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-line">
+                    <div
+                      className="h-full rounded-full bg-ink transition-[width]"
+                      style={{ width: `${percent}%` }}
+                    />
+                  </div>
+                  {run.error && (
+                    <p className="mt-2 break-words text-[11px] text-danger">{run.error}</p>
+                  )}
+                </div>
+              )}
+
+              {metadataNotice && (
+                <p className="mt-3 border-l-2 border-ok bg-ok/5 px-2 py-1 text-xs text-ok">
+                  {metadataNotice}
+                </p>
+              )}
+            </div>
+          )
+        })()}
+
         {error && (
           <p className="mt-4 border-l-2 border-danger bg-danger/5 px-3 py-2 text-xs text-danger">
             {error}
           </p>
         )}
 
-        <form onSubmit={handleImport} className="mt-5 border-t border-line pt-4">
-          <label htmlFor="playlist-url" className="label mb-1.5 block">
-            Import from Spotify
-          </label>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <input
-              id="playlist-url"
-              type="text"
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              placeholder="https://open.spotify.com/playlist/…"
-              className="field flex-1 font-mono text-xs"
-              required
-            />
-            <button
-              type="submit"
-              disabled={importing || input.trim().length === 0}
-              className="btn shrink-0"
-            >
-              {importing ? 'Importing…' : 'Import'}
-            </button>
-          </div>
-          <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
-            Connect the playlist owner&apos;s account · re-import keeps ratings
+        {(!playlist || playlist.started_at === null) && (
+          <form onSubmit={schedulePlaylist} className="mt-5 border-t border-line pt-4">
+            <label htmlFor="playlist-url" className="label mb-1.5 block">
+              {playlist ? 'Update the schedule' : 'Set a playlist'}
+            </label>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                id="playlist-url"
+                type="text"
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                placeholder="https://open.spotify.com/playlist/…"
+                className="field min-w-0 flex-1 font-mono text-xs"
+                required
+              />
+              <input
+                type="datetime-local"
+                value={startInput}
+                onChange={(event) => setStartInput(event.target.value)}
+                className="field min-w-0 font-mono text-xs sm:w-56"
+                aria-label="Scheduled start date and time"
+                required
+              />
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="submit"
+                disabled={scheduling || input.trim().length === 0 || !startInput}
+                className="btn shrink-0"
+              >
+                {scheduling
+                  ? 'Scheduling…'
+                  : playlist
+                    ? 'Update schedule'
+                    : 'Schedule'}
+              </button>
+              {!playlist && (
+                <button
+                  type="button"
+                  onClick={() => void startNow()}
+                  disabled={importing || input.trim().length === 0}
+                  className="btn-ghost shrink-0"
+                >
+                  {importing ? 'Starting…' : 'Start now'}
+                </button>
+              )}
+            </div>
+            <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
+              Songs are fetched when voting starts, so late additions are included
+              · connect the playlist owner&apos;s account
+            </p>
+          </form>
+        )}
+
+        {scheduleNotice && (
+          <p className="mt-4 border-l-2 border-ok bg-ok/5 px-3 py-2 text-xs text-ok">
+            {scheduleNotice}
           </p>
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+        )}
+
+        {playlist?.started_at && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
             <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
-              Previews are fetched from Spotify when missing
+              Refresh the tape or fill preview gaps without touching picks
             </span>
-            <button
-              type="button"
-              onClick={() => void fetchPreviews()}
-              disabled={backfilling}
-              className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted underline decoration-line underline-offset-2 transition hover:text-ink disabled:opacity-50"
-            >
-              {backfilling ? 'Fetching…' : 'Fetch missing previews'}
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void resyncPlaylist()}
+                disabled={syncing}
+                className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted underline decoration-line underline-offset-2 transition hover:text-ink disabled:opacity-50"
+              >
+                {syncing ? 'Re-syncing…' : 'Re-sync playlist'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void fetchPreviews()}
+                disabled={backfilling}
+                className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted underline decoration-line underline-offset-2 transition hover:text-ink disabled:opacity-50"
+              >
+                {backfilling ? 'Fetching…' : 'Fetch missing previews'}
+              </button>
+            </div>
           </div>
-        </form>
+        )}
       </div>
     </section>
   )

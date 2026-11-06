@@ -25,16 +25,49 @@ pub struct ImportedPlaylist {
     pub skipped_tracks: usize,
 }
 
+/// Playlist metadata without fetching its items. Used when scheduling a
+/// playlist before its song list is loaded.
+#[derive(Debug, Clone)]
+pub struct ImportedPlaylistInfo {
+    pub spotify_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub image_url: Option<String>,
+    pub owner_name: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ImportedTrack {
     pub spotify_id: String,
     pub title: String,
     pub artists: String,
+    pub artist_refs: Vec<ImportedArtistRef>,
     pub album: Option<String>,
+    pub album_id: Option<String>,
     pub album_image_url: Option<String>,
+    pub album_type: Option<String>,
+    pub total_tracks: Option<i32>,
+    pub release_date: Option<String>,
+    pub release_date_precision: Option<String>,
+    pub release_year: Option<i32>,
     pub preview_url: Option<String>,
     pub duration_ms: Option<i32>,
+    pub disc_number: Option<i32>,
+    pub track_number: Option<i32>,
     pub position: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportedArtistRef {
+    pub spotify_id: Option<String>,
+    pub name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportedArtist {
+    pub spotify_id: String,
+    pub name: String,
+    pub genres: Vec<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -108,13 +141,9 @@ impl SpotifyClient {
         self
     }
 
-    pub fn authorize_url(
-        &self,
-        redirect_uri: &str,
-        state: &str,
-    ) -> Result<String, SpotifyError> {
-        let mut url = reqwest::Url::parse(&self.authorize_url)
-            .context("invalid Spotify authorize URL")?;
+    pub fn authorize_url(&self, redirect_uri: &str, state: &str) -> Result<String, SpotifyError> {
+        let mut url =
+            reqwest::Url::parse(&self.authorize_url).context("invalid Spotify authorize URL")?;
 
         url.query_pairs_mut()
             .append_pair("response_type", "code")
@@ -140,10 +169,7 @@ impl SpotifyClient {
         .await
     }
 
-    pub async fn refresh_user_token(
-        &self,
-        refresh_token: &str,
-    ) -> Result<TokenSet, SpotifyError> {
+    pub async fn refresh_user_token(&self, refresh_token: &str) -> Result<TokenSet, SpotifyError> {
         self.token_request(&[
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh_token),
@@ -160,11 +186,7 @@ impl SpotifyClient {
     /// Mode apps. The public embed page still carries the 30-second preview
     /// MP3 URL, so we read it from there as a fallback.
     pub async fn fetch_preview_url(&self, spotify_id: &str) -> Option<String> {
-        let url = format!(
-            "{}/{}",
-            self.embed_base.trim_end_matches('/'),
-            spotify_id
-        );
+        let url = format!("{}/{}", self.embed_base.trim_end_matches('/'), spotify_id);
 
         let response = self
             .http
@@ -202,6 +224,81 @@ impl SpotifyClient {
     ) -> Result<ImportedPlaylist, SpotifyError> {
         let token = self.client_credentials_token().await?;
         self.fetch_playlist_with_token(playlist_id, &token).await
+    }
+
+    pub async fn fetch_playlist_info(
+        &self,
+        playlist_id: &str,
+    ) -> Result<ImportedPlaylistInfo, SpotifyError> {
+        let token = self.client_credentials_token().await?;
+        self.fetch_playlist_info_with_token(playlist_id, &token)
+            .await
+    }
+
+    pub async fn fetch_playlist_info_with_token(
+        &self,
+        playlist_id: &str,
+        token: &str,
+    ) -> Result<ImportedPlaylistInfo, SpotifyError> {
+        let metadata: PlaylistMetadata = self
+            .get_json(
+                token,
+                &format!("{}/playlists/{playlist_id}", self.api_base),
+                vec![("fields", PLAYLIST_FIELDS.to_string())],
+            )
+            .await?;
+
+        Ok(ImportedPlaylistInfo {
+            spotify_id: metadata.id,
+            name: metadata.name,
+            description: metadata.description,
+            image_url: largest_image_url(&metadata.images),
+            owner_name: metadata.owner.display_name,
+        })
+    }
+
+    /// Fetch artist genres in batches of 50, the Spotify API maximum.
+    pub async fn fetch_artists(
+        &self,
+        token: &str,
+        spotify_ids: &[String],
+    ) -> Result<Vec<ImportedArtist>, SpotifyError> {
+        let mut unique = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for id in spotify_ids {
+            if !id.is_empty() && seen.insert(id.clone()) {
+                unique.push(id.clone());
+            }
+        }
+
+        let mut artists = Vec::new();
+        for chunk in unique.chunks(50) {
+            let page: ArtistList = self
+                .get_json(
+                    token,
+                    &format!("{}/artists", self.api_base),
+                    vec![("ids", chunk.join(","))],
+                )
+                .await?;
+
+            for artist in page.artists {
+                let Some(id) = artist.id.filter(|id| !id.is_empty()) else {
+                    continue;
+                };
+                artists.push(ImportedArtist {
+                    spotify_id: id,
+                    name: artist.name,
+                    genres: artist.genres,
+                });
+            }
+        }
+
+        tracing::debug!(
+            requested = spotify_ids.len(),
+            found = artists.len(),
+            "fetched Spotify artists"
+        );
+        Ok(artists)
     }
 
     /// Fetches playlist metadata and every item using a user access token.
@@ -242,7 +339,12 @@ impl SpotifyClient {
 
             let total = page.total;
             let page_len = page.items.len();
-            tracing::debug!(offset, total, received = page_len, "fetched Spotify playlist page");
+            tracing::debug!(
+                offset,
+                total,
+                received = page_len,
+                "fetched Spotify playlist page"
+            );
 
             for (index, item) in page.items.into_iter().enumerate() {
                 let position = offset as usize + index;
@@ -288,7 +390,7 @@ impl SpotifyClient {
         })
     }
 
-    async fn client_credentials_token(&self) -> Result<String, SpotifyError> {
+    pub(crate) async fn client_credentials_token(&self) -> Result<String, SpotifyError> {
         let tokens = self
             .token_request(&[("grant_type", "client_credentials")])
             .await?;
@@ -365,11 +467,7 @@ impl SpotifyClient {
 
             if status.as_u16() == 429 {
                 let wait_seconds = retry_after_seconds(&response).clamp(1, 30);
-                tracing::warn!(
-                    attempt,
-                    wait_seconds,
-                    "Spotify rate limit hit, backing off"
-                );
+                tracing::warn!(attempt, wait_seconds, "Spotify rate limit hit, backing off");
                 tokio::time::sleep(std::time::Duration::from_secs(wait_seconds)).await;
                 continue;
             }
@@ -400,8 +498,7 @@ impl SpotifyClient {
                 });
             }
 
-            return Ok(serde_json::from_str(&body)
-                .context("failed to parse Spotify response")?);
+            return Ok(serde_json::from_str(&body).context("failed to parse Spotify response")?);
         }
 
         Err(SpotifyError::RateLimited)
@@ -425,7 +522,10 @@ pub fn parse_playlist_id(input: &str) -> Option<String> {
     };
 
     let candidate = candidate.trim();
-    if candidate.len() == 22 && candidate.chars().all(|character| character.is_ascii_alphanumeric())
+    if candidate.len() == 22
+        && candidate
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
     {
         Some(candidate.to_string())
     } else {
@@ -442,9 +542,7 @@ pub fn extract_preview_url(html: &str) -> Option<String> {
     let start = normalized.find(MARKER)?;
     let rest = &normalized[start..];
     let end = rest
-        .find(|character: char| {
-            matches!(character, '"' | '\'' | '<' | ' ' | '\\' | '\n' | '\r')
-        })
+        .find(|character: char| matches!(character, '"' | '\'' | '<' | ' ' | '\\' | '\n' | '\r'))
         .unwrap_or(rest.len());
     let url = &rest[..end];
 
@@ -542,18 +640,34 @@ struct TrackObject {
     album: Option<AlbumObject>,
     preview_url: Option<String>,
     duration_ms: Option<i64>,
+    disc_number: Option<i32>,
+    track_number: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ArtistObject {
+    id: Option<String>,
     name: String,
+    #[serde(default)]
+    genres: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct AlbumObject {
+    id: Option<String>,
     name: String,
+    album_type: Option<String>,
+    total_tracks: Option<i32>,
+    release_date: Option<String>,
+    release_date_precision: Option<String>,
     #[serde(default)]
     images: Vec<Image>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ArtistList {
+    #[serde(default)]
+    artists: Vec<ArtistObject>,
 }
 
 impl TrackObject {
@@ -568,17 +682,43 @@ impl TrackObject {
             return None;
         }
 
-        let artists = if self.artists.is_empty() {
+        let artist_refs = self
+            .artists
+            .iter()
+            .map(|artist| ImportedArtistRef {
+                spotify_id: artist.id.clone().filter(|id| !id.is_empty()),
+                name: artist.name.clone(),
+            })
+            .collect::<Vec<_>>();
+
+        let artists = if artist_refs.is_empty() {
             "Unknown artist".to_string()
         } else {
-            self.artists
-                .into_iter()
-                .map(|artist| artist.name)
+            artist_refs
+                .iter()
+                .map(|artist| artist.name.as_str())
                 .collect::<Vec<_>>()
                 .join(", ")
         };
 
+        let album_id = self.album.as_ref().and_then(|album| album.id.clone());
         let album = self.album.as_ref().map(|album| album.name.clone());
+        let album_type = self
+            .album
+            .as_ref()
+            .and_then(|album| album.album_type.clone());
+        let total_tracks = self.album.as_ref().and_then(|album| album.total_tracks);
+        let release_date = self
+            .album
+            .as_ref()
+            .and_then(|album| album.release_date.clone());
+        let release_date_precision = self
+            .album
+            .as_ref()
+            .and_then(|album| album.release_date_precision.clone());
+        let release_year = release_date
+            .as_deref()
+            .and_then(crate::metadata::parse_release_year);
         let album_image_url = self
             .album
             .as_ref()
@@ -588,12 +728,19 @@ impl TrackObject {
             spotify_id,
             title: title.to_string(),
             artists,
+            artist_refs,
             album,
+            album_id,
             album_image_url,
-            preview_url: self
-                .preview_url
-                .filter(|url| !url.trim().is_empty()),
+            album_type,
+            total_tracks,
+            release_date,
+            release_date_precision,
+            release_year,
+            preview_url: self.preview_url.filter(|url| !url.trim().is_empty()),
             duration_ms: self.duration_ms.and_then(|value| i32::try_from(value).ok()),
+            disc_number: self.disc_number,
+            track_number: self.track_number,
             position: i32::try_from(position).unwrap_or(i32::MAX),
         })
     }
@@ -609,11 +756,7 @@ mod tests {
     #[test]
     fn parses_playlist_ids_from_all_supported_forms() {
         let id = "37i9dQZF1DXcBWIGoYBM5M";
-        assert_eq!(
-            parse_playlist_id(id).as_deref(),
-            Some(id),
-            "bare id"
-        );
+        assert_eq!(parse_playlist_id(id).as_deref(), Some(id), "bare id");
         assert_eq!(
             parse_playlist_id(&format!("https://open.spotify.com/playlist/{id}?si=abc")).as_deref(),
             Some(id),

@@ -89,12 +89,11 @@ pub async fn revoke_invite(
     admin: AdminUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let used = sqlx::query_scalar::<_, bool>(
-        "SELECT used_at IS NOT NULL FROM invites WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(&state.db)
-    .await?;
+    let used =
+        sqlx::query_scalar::<_, bool>("SELECT used_at IS NOT NULL FROM invites WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await?;
 
     let Some(used) = used else {
         return Err(ApiError::NotFound("invite not found".to_string()));

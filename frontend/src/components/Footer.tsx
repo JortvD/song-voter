@@ -32,20 +32,12 @@ export function Footer() {
             )}
             <SoundToggle />
             {user?.is_admin && (
-              <>
-                <Link
-                  to="/admin"
-                  className="font-mono text-[9px] font-medium uppercase tracking-[0.16em] text-muted transition hover:text-ink"
-                >
-                  Mission control
-                </Link>
-                <Link
-                  to="/design"
-                  className="font-mono text-[9px] font-medium uppercase tracking-[0.16em] text-muted transition hover:text-ink"
-                >
-                  Style tile
-                </Link>
-              </>
+              <Link
+                to="/admin"
+                className="font-mono text-[9px] font-medium uppercase tracking-[0.16em] text-muted transition hover:text-ink"
+              >
+                Mission control
+              </Link>
             )}
           </div>
         </div>

@@ -1,4 +1,12 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import type { ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 
@@ -20,26 +28,47 @@ export function PlaylistProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const location = useLocation()
+  const abortRef = useRef<AbortController | null>(null)
 
   const refresh = useCallback(async () => {
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
     try {
-      const next = await api.getChartStatus()
+      const next = await api.getChartStatus(controller.signal)
+      if (controller.signal.aborted) return
       setStatus(next)
       setError(null)
     } catch (caught) {
+      if (controller.signal.aborted) return
       setError(
         caught instanceof ApiError
           ? caught.message
           : 'Could not load the current playlist',
       )
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
     void refresh()
+    return () => abortRef.current?.abort()
   }, [location.pathname, refresh])
+
+  // Keep scheduled starts, scheduled reveals and pause changes live without a
+  // manual refresh. The backend scheduler does the actual work.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void refresh()
+    }, 15_000)
+
+    return () => {
+      window.clearInterval(timer)
+      abortRef.current?.abort()
+    }
+  }, [refresh])
 
   useEffect(() => {
     let active = true

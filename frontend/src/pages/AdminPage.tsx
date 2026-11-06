@@ -6,6 +6,7 @@ import { AdminInvites } from '../components/AdminInvites'
 import { AdminPlaylist } from '../components/AdminPlaylist'
 import { AdminRankingTable } from '../components/AdminRankingTable'
 import { AdminReveal } from '../components/AdminReveal'
+import { AdminSettings } from '../components/admin/AdminSettings'
 import { AdminUsers } from '../components/AdminUsers'
 import { RequireAdmin } from '../components/RequireAdmin'
 import { StatusCard } from '../components/StatusCard'
@@ -14,11 +15,20 @@ import type { AdminSection } from '../components/admin/AdminNav'
 import { AdminOverview } from '../components/admin/AdminOverview'
 import { AdminSectionHeader } from '../components/admin/AdminSectionHeader'
 import { AdminStatusStrip } from '../components/admin/AdminStatusStrip'
+import { usePlaylist } from '../context/PlaylistContext'
 import { ApiError, api } from '../lib/api'
 import type { AdminInsights } from '../lib/types'
 
+function initialSection(): AdminSection {
+  if (typeof window === 'undefined') return 'overview'
+
+  const params = new URLSearchParams(window.location.search)
+  return params.has('spotify') ? 'playlist' : 'overview'
+}
+
 function MissionControl() {
-  const [section, setSection] = useState<AdminSection>('overview')
+  const { refresh: refreshPlaylist } = usePlaylist()
+  const [section, setSection] = useState<AdminSection>(initialSection)
   const [insights, setInsights] = useState<AdminInsights | null>(null)
   const [days, setDays] = useState(14)
   const [loading, setLoading] = useState(true)
@@ -49,6 +59,7 @@ function MissionControl() {
   function refresh() {
     setRefreshKey((value) => value + 1)
     void load()
+    void refreshPlaylist()
   }
 
   return (
@@ -82,7 +93,7 @@ function MissionControl() {
               <AdminSectionHeader
                 eyebrow="The room"
                 title="Voters"
-                description="Every account, with picks, duels and last activity. Sort the list, search by username, or export the whole room."
+                description="Every account, with picks, duels and last activity. Expand a voter to rename them, reset a password, revoke sessions, clear picks or delete the account. You can also sort, search, or export the whole room."
               >
                 <a href="/api/admin/users.csv" className="pv-admin-button">
                   Export voters CSV
@@ -118,7 +129,7 @@ function MissionControl() {
               <AdminSectionHeader
                 eyebrow="The tape"
                 title="Playlist"
-                description="Import or re-sync the Spotify playlist, watch preview coverage and keep the current session healthy."
+                description="Set a Spotify playlist and its scheduled start, force-start it, re-sync its metadata, and watch preview and metadata coverage."
               >
                 <button type="button" onClick={refresh} className="pv-admin-button">
                   Refresh
@@ -133,13 +144,16 @@ function MissionControl() {
               <AdminSectionHeader
                 eyebrow="The switch"
                 title="The Reveal"
-                description="Open or seal the shared standings. Picking stays open either way, and you can hide the list again at any time."
+                description="Schedule or open The Reveal, pause and resume voting, and seal the shared standings again at any time."
               >
                 <Link to="/standings" className="pv-admin-button">
                   Public standings
                 </Link>
               </AdminSectionHeader>
-              <AdminReveal key={`reveal-${refreshKey}`} />
+              <AdminReveal
+                key={`reveal-${refreshKey}`}
+                onOpenPlaylist={() => setSection('playlist')}
+              />
             </div>
           )}
 
@@ -148,7 +162,7 @@ function MissionControl() {
               <AdminSectionHeader
                 eyebrow="The door"
                 title="Invites"
-                description="Generate invite codes, copy them for voters, and revoke any code that has not been used yet."
+                description="Generate invite codes, copy a code or a ready-to-send link, and revoke any code that has not been used yet."
               >
                 <button type="button" onClick={refresh} className="pv-admin-button">
                   Refresh
@@ -173,17 +187,29 @@ function MissionControl() {
             </div>
           )}
 
+          {section === 'settings' && (
+            <div className="space-y-4">
+              <AdminSectionHeader
+                eyebrow="League rules"
+                title="Settings"
+                description="App-wide rules that apply to every voter. Changes take effect immediately."
+              />
+              <AdminSettings key={`settings-${refreshKey}`} />
+            </div>
+          )}
+
           {section === 'danger' && (
             <div className="space-y-4">
               <AdminSectionHeader
                 eyebrow="Careful"
                 title="Danger zone"
-                description="Destructive actions for the active playlist. Both require a typed confirmation, and both keep voters, invites and the Spotify connection."
+                description="Destructive actions for the active playlist. Reset picks and Remove playlist keep voters and invites; Full reset also clears them. All keep the Spotify connection."
               />
               <AdminDangerZone
                 key={`danger-${refreshKey}`}
                 onReset={refresh}
                 onRemove={refresh}
+                onOpenPlaylist={() => setSection('playlist')}
               />
             </div>
           )}

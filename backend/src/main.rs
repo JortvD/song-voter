@@ -1,14 +1,19 @@
 mod api;
 mod audit;
 mod auth;
+mod cache;
 mod config;
 mod db;
 mod elo;
 mod error;
+mod metadata;
+mod metadata_backfill;
 mod models;
 mod preview_backfill;
 mod rate_limit;
+mod ratings;
 mod routes;
+mod scheduler;
 mod spotify;
 mod spotify_auth;
 mod state;
@@ -22,6 +27,7 @@ use axum::Router;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use tower::ServiceBuilder;
+use tower_http::compression::CompressionLayer;
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -51,9 +57,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     if config.jwt_secret_was_generated {
-        warn!(
-            "JWT_SECRET is not set; using an ephemeral secret. Sessions reset on every restart."
-        );
+        warn!("JWT_SECRET is not set; using an ephemeral secret. Sessions reset on every restart.");
     } else if config.jwt_secret.len() < 32 {
         warn!("JWT_SECRET is shorter than 32 characters; use a longer random value.");
     }
@@ -78,37 +82,37 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let spotify = match (
-        &config.spotify_client_id,
-        &config.spotify_client_secret,
-    ) {
+    let spotify = match (&config.spotify_client_id, &config.spotify_client_secret) {
         (Some(client_id), Some(client_secret)) => {
             info!(
                 api_base = %config.spotify_api_base,
                 "Spotify playlist import configured"
             );
-            Some(SpotifyClient::with_bases(
-                client_id.clone(),
-                client_secret.clone(),
-                config.spotify_api_base.clone(),
-                config.spotify_accounts_base.clone(),
+            Some(
+                SpotifyClient::with_bases(
+                    client_id.clone(),
+                    client_secret.clone(),
+                    config.spotify_api_base.clone(),
+                    config.spotify_accounts_base.clone(),
+                )
+                .with_authorize_url(config.spotify_authorize_url.clone())
+                .with_embed_base(config.spotify_embed_base.clone()),
             )
-            .with_authorize_url(config.spotify_authorize_url.clone())
-            .with_embed_base(config.spotify_embed_base.clone()))
         }
         (None, None) => {
             warn!("Spotify import disabled (SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET not set)");
             None
         }
         _ => {
-            warn!(
-                "Spotify import disabled: set both SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET"
-            );
+            warn!("Spotify import disabled: set both SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET");
             None
         }
     };
 
     let db = connect_database(&config.database_url).await?;
+    metadata_backfill::fail_orphaned_runs(&db)
+        .await
+        .context("failed to mark orphaned metadata backfills")?;
     info!("database connection pool ready, migrations applied");
 
     bootstrap_admin(&db, &config).await?;
@@ -127,7 +131,12 @@ async fn main() -> anyhow::Result<()> {
         register_rate_limit: config.register_rate_limit,
         started_at: std::time::Instant::now(),
         environment: config.environment.clone(),
+        cache: std::sync::Arc::new(crate::cache::ResponseCache::new(512)),
+        auth_cache: std::sync::Arc::new(crate::cache::AuthUserCache::new(4096)),
+        heavy_work: std::sync::Arc::new(tokio::sync::Semaphore::new(3)),
     };
+
+    scheduler::spawn(state.clone());
 
     let app = build_router(state, &config.frontend_dir);
     let bind_address = config.bind_address();
@@ -165,8 +174,18 @@ fn init_tracing(default_level: &str) {
 
 async fn connect_database(database_url: &str) -> anyhow::Result<PgPool> {
     let pool = PgPoolOptions::new()
-        .max_connections(10)
+        .max_connections(16)
         .acquire_timeout(Duration::from_secs(5))
+        // Guard against a single pathological query occupying a connection for
+        // the full request timeout. Interactive routes finish far sooner.
+        .after_connect(|connection, _metadata| {
+            Box::pin(async move {
+                sqlx::query("SET statement_timeout = '15s'")
+                    .execute(&mut *connection)
+                    .await?;
+                Ok(())
+            })
+        })
         .connect(database_url)
         .await
         .context("failed to connect to PostgreSQL")?;
@@ -188,12 +207,11 @@ async fn bootstrap_admin(pool: &PgPool, config: &Config) -> anyhow::Result<()> {
     };
     let username = username.trim();
 
-    let existing = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM users WHERE lower(username) = lower($1)",
-    )
-    .bind(username)
-    .fetch_optional(pool)
-    .await?;
+    let existing =
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM users WHERE lower(username) = lower($1)")
+            .bind(username)
+            .fetch_optional(pool)
+            .await?;
 
     if let Some(user_id) = existing {
         sqlx::query("UPDATE users SET is_admin = TRUE WHERE id = $1")
@@ -207,7 +225,8 @@ async fn bootstrap_admin(pool: &PgPool, config: &Config) -> anyhow::Result<()> {
     let password_hash = auth::hash_password(password).await?;
     let admin = sqlx::query_as::<_, models::User>(
         "INSERT INTO users (username, password_hash, is_admin) VALUES ($1, $2, TRUE) \
-         RETURNING id, username, password_hash, is_admin, created_at",
+         RETURNING id, username, password_hash, is_admin, created_at, disabled_at, \
+                   session_version",
     )
     .bind(username)
     .bind(&password_hash)
@@ -220,6 +239,11 @@ async fn bootstrap_admin(pool: &PgPool, config: &Config) -> anyhow::Result<()> {
 }
 
 fn build_router(state: AppState, frontend_dir: &str) -> Router {
+    // Playlist imports are admin-only and can involve dozens of Spotify pages
+    // with rate-limit backoff. Keep the request timeout generous enough for a
+    // large playlist while the database statement timeout still protects the
+    // pool from pathological queries.
+    const REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
     const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; \
         img-src 'self' https://*.scdn.co data:; \
         media-src https://p.scdn.co; \
@@ -232,7 +256,28 @@ fn build_router(state: AppState, frontend_dir: &str) -> Router {
         form-action 'self'";
 
     let index_file = format!("{frontend_dir}/index.html");
-    let static_files = ServeDir::new(frontend_dir).fallback(ServeFile::new(index_file));
+    // Hashed assets are served by the dedicated services below with immutable
+    // caching. The SPA shell and other root files must revalidate so a deploy
+    // never leaves a browser pointing at deleted asset hashes.
+    let static_files = ServiceBuilder::new()
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-cache"),
+        ))
+        .service(ServeDir::new(frontend_dir).fallback(ServeFile::new(index_file)));
+
+    let immutable = || {
+        SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=31536000, immutable"),
+        )
+    };
+    let assets = ServiceBuilder::new()
+        .layer(immutable())
+        .service(ServeDir::new(format!("{frontend_dir}/assets")));
+    let fonts = ServiceBuilder::new()
+        .layer(immutable())
+        .service(ServeDir::new(format!("{frontend_dir}/fonts")));
 
     let api = Router::new()
         .route("/health", get(routes::health))
@@ -244,30 +289,31 @@ fn build_router(state: AppState, frontend_dir: &str) -> Router {
         ));
 
     Router::new()
+        .nest_service("/assets", assets)
+        .nest_service("/fonts", fonts)
         .route("/healthz", get(routes::health))
         .route("/readyz", get(routes::ready))
         .nest("/api", api)
         .fallback_service(static_files)
         .layer(
             ServiceBuilder::new()
+                .layer(CompressionLayer::new())
                 .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
                 .layer(
                     TraceLayer::new_for_http()
-                        .make_span_with(
-                            |request: &Request<_>| {
-                                let request_id = request
-                                    .headers()
-                                    .get("x-request-id")
-                                    .and_then(|value| value.to_str().ok())
-                                    .unwrap_or("-");
-                                info_span!(
-                                    "http_request",
-                                    method = %request.method(),
-                                    uri = %request.uri(),
-                                    request_id = %request_id,
-                                )
-                            },
-                        )
+                        .make_span_with(|request: &Request<_>| {
+                            let request_id = request
+                                .headers()
+                                .get("x-request-id")
+                                .and_then(|value| value.to_str().ok())
+                                .unwrap_or("-");
+                            info_span!(
+                                "http_request",
+                                method = %request.method(),
+                                path = %request.uri().path(),
+                                request_id = %request_id,
+                            )
+                        })
                         .on_response(DefaultOnResponse::new().level(Level::INFO))
                         .on_failure(DefaultOnFailure::new().level(Level::ERROR)),
                 )
@@ -275,7 +321,7 @@ fn build_router(state: AppState, frontend_dir: &str) -> Router {
         )
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
-            Duration::from_secs(60),
+            REQUEST_TIMEOUT,
         ))
         .layer(SetResponseHeaderLayer::overriding(
             header::X_CONTENT_TYPE_OPTIONS,

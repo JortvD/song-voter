@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 
 import { useAuth } from '../context/AuthContext'
@@ -15,6 +15,26 @@ export function AuthCard() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  useEffect(() => {
+    const invite = new URLSearchParams(window.location.search)
+      .get('invite')
+      ?.trim()
+      .toUpperCase()
+
+    if (!invite) return
+
+    setMode('register')
+    setInviteCode(invite)
+
+    const timer = window.setTimeout(() => {
+      document
+        .getElementById('auth')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 80)
+
+    return () => window.clearTimeout(timer)
+  }, [])
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError(null)
@@ -26,6 +46,17 @@ export function AuthCard() {
       } else {
         await register(username, password, inviteCode)
       }
+
+      const url = new URL(window.location.href)
+      if (url.searchParams.has('invite')) {
+        url.searchParams.delete('invite')
+        window.history.replaceState(
+          {},
+          '',
+          `${url.pathname}${url.search}${url.hash}`,
+        )
+      }
+
       setPassword('')
       setInviteCode('')
     } catch (caught) {
@@ -41,17 +72,17 @@ export function AuthCard() {
   }
 
   return (
-    <section id="auth" className="pv-card overflow-hidden">
-      <div className="flex items-center justify-between gap-3 border-b-2 border-ink bg-ink px-5 py-3 text-paper">
+    <section id="auth" className="pv-card min-w-0 overflow-hidden">
+      <div className="flex min-w-0 items-center justify-between gap-3 border-b-2 border-ink bg-ink px-5 py-3 text-paper">
         <div className="flex min-w-0 items-center gap-2">
           <span className="pv-sticker pv-sticker-butter px-1.5 py-0.5 text-[9px]">
             Membership
           </span>
-          <span className="truncate font-serif text-lg leading-none tracking-[-0.02em]">
+          <span className="min-w-0 truncate font-serif text-lg leading-none tracking-[-0.02em]">
             Backstage pass
           </span>
         </div>
-        <span className="shrink-0 font-mono text-[9px] uppercase tracking-[0.16em] text-paper/85">
+        <span className="hidden shrink-0 font-mono text-[9px] uppercase tracking-[0.16em] text-paper/85 sm:inline">
           Invite only
         </span>
       </div>

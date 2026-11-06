@@ -26,6 +26,24 @@ export function applyPlaylistAccent(value: PlaylistAccent | null) {
   root.style.setProperty('--playlist-accent-ink', accent.ink)
   root.style.setProperty('--playlist-accent-soft', accent.soft)
   root.style.setProperty('--playlist-accent-tint', accent.tint)
+
+  applyFaviconAccent(accent)
+}
+
+/** Keep the tab icon's tape card in sync with the current album's accent. */
+function applyFaviconAccent(accent: PlaylistAccent) {
+  const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
+  if (!link) return
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 44">
+  <rect x="4" y="8" width="23" height="28" rx="5" transform="rotate(-7 15.5 22)" fill="#f7eedf" stroke="#141a2a" stroke-width="2" />
+  <rect x="17" y="8" width="23" height="28" rx="5" transform="rotate(7 28.5 22)" fill="${accent.accent}" stroke="#141a2a" stroke-width="2" />
+  <text x="12.5" y="27" text-anchor="middle" font-family="'Bricolage Grotesque', 'DM Sans', sans-serif" font-size="14" font-weight="700" fill="#141a2a">A</text>
+  <text x="31.5" y="27" text-anchor="middle" font-family="'Bricolage Grotesque', 'DM Sans', sans-serif" font-size="14" font-weight="700" fill="${accent.ink}">B</text>
+</svg>`
+
+  link.type = 'image/svg+xml'
+  link.href = `data:image/svg+xml,${encodeURIComponent(svg)}`
 }
 
 /**

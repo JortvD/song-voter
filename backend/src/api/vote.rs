@@ -1,12 +1,14 @@
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::Json;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgConnection};
 use uuid::Uuid;
 
+use crate::api::history::{recent_picked, DuelHistoryItem, RECENT_DUEL_LIMIT};
+use crate::api::streak::{load_streak, StreakQuery, StreakSummary};
 use crate::auth::AuthUser;
-use crate::db::user_progress;
+use crate::db::{user_progress, voting_block_reason_parts};
 use crate::elo;
 use crate::error::ApiError;
 use crate::models::MatchupTrack;
@@ -41,6 +43,8 @@ pub struct UndoResponse {
     compared_pairs: i64,
     tracks_seen: i64,
     votes_cast: i64,
+    recent_duels: Vec<DuelHistoryItem>,
+    streak: StreakSummary,
 }
 
 #[derive(Debug, FromRow)]
@@ -53,6 +57,26 @@ struct VoteTrack {
 struct InsertedVote {
     id: Uuid,
     created_at: DateTime<Utc>,
+}
+
+async fn ensure_voting_allowed(
+    connection: &mut PgConnection,
+    playlist_id: Uuid,
+) -> Result<(), ApiError> {
+    let (started_at, scheduled_start_at, voting_paused) =
+        sqlx::query_as::<_, (Option<DateTime<Utc>>, Option<DateTime<Utc>>, bool)>(
+            "SELECT started_at, scheduled_start_at, voting_paused \
+             FROM playlists WHERE id = $1",
+        )
+        .bind(playlist_id)
+        .fetch_one(connection)
+        .await?;
+
+    if let Some(reason) = voting_block_reason_parts(started_at, scheduled_start_at, voting_paused) {
+        return Err(ApiError::Conflict(reason));
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, FromRow)]
@@ -73,9 +97,7 @@ pub async fn cast(
     Json(payload): Json<VoteRequest>,
 ) -> Result<Json<VoteResponse>, ApiError> {
     if payload.track_a == payload.track_b {
-        return Err(ApiError::bad_request(
-            "a duel needs two different tracks",
-        ));
+        return Err(ApiError::bad_request("a duel needs two different tracks"));
     }
     if payload.winner != payload.track_a && payload.winner != payload.track_b {
         return Err(ApiError::bad_request(
@@ -118,6 +140,8 @@ pub async fn cast(
             "this duel was not served to you, or the playlist changed",
         ));
     };
+
+    ensure_voting_allowed(&mut transaction, playlist_id).await?;
 
     // Lock both tracks in a consistent (UUID) order to avoid deadlocks.
     let low = lock_track(&mut transaction, low_id, playlist_id).await?;
@@ -238,14 +262,14 @@ pub async fn cast(
 pub async fn undo(
     State(state): State<AppState>,
     user: AuthUser,
+    Query(query): Query<StreakQuery>,
 ) -> Result<Json<UndoResponse>, ApiError> {
     let mut transaction = state.db.begin().await?;
 
-    let playlist_id = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM playlists WHERE is_active LIMIT 1",
-    )
-    .fetch_optional(&mut *transaction)
-    .await?;
+    let playlist_id =
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM playlists WHERE is_active LIMIT 1")
+            .fetch_optional(&mut *transaction)
+            .await?;
 
     let Some(playlist_id) = playlist_id else {
         transaction.rollback().await.ok();
@@ -253,6 +277,8 @@ pub async fn undo(
             "no active playlist has been imported yet".to_string(),
         ));
     };
+
+    ensure_voting_allowed(&mut transaction, playlist_id).await?;
 
     let vote = sqlx::query_as::<_, UndoableVote>(
         "SELECT id, track_low, track_high, winner, delta_low, delta_high, created_at \
@@ -306,7 +332,9 @@ pub async fn undo(
         .await?;
 
     let tracks = sqlx::query_as::<_, MatchupTrack>(
-        "SELECT id, spotify_id, title, artists, album, album_image_url, preview_url, duration_ms \
+        "SELECT id, spotify_id, title, artists, album, album_image_url, preview_url, duration_ms, \
+                release_year, decade, album_id, album_type, total_tracks, disc_number, \
+                track_number, primary_genre \
          FROM tracks WHERE id = ANY($1)",
     )
     .bind(vec![vote.track_low, vote.track_high])
@@ -325,6 +353,9 @@ pub async fn undo(
         .ok_or_else(|| ApiError::internal(anyhow::anyhow!("undone high track is missing")))?;
 
     let progress = user_progress(&mut *transaction, user.0.id, playlist_id).await?;
+    let recent_duels =
+        recent_picked(&mut *transaction, user.0.id, playlist_id, RECENT_DUEL_LIMIT).await?;
+    let streak = load_streak(&mut *transaction, user.0.id, query.tz.as_deref()).await?;
 
     transaction.commit().await?;
 
@@ -352,6 +383,8 @@ pub async fn undo(
         compared_pairs: progress.compared_pairs,
         tracks_seen: progress.tracks_seen,
         votes_cast: progress.votes_cast,
+        recent_duels,
+        streak,
     }))
 }
 

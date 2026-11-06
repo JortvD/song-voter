@@ -3,14 +3,26 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 import { AuthCard } from '../components/AuthCard'
+import { Countdown } from '../components/Countdown'
 import { MixtapeCase } from '../components/MixtapeCase'
+import { StreakCard } from '../components/streak/StreakCard'
+import { StreakFlame } from '../components/streak/StreakFlame'
 import { useAuth } from '../context/AuthContext'
 import { usePlaylist } from '../context/PlaylistContext'
 import { api } from '../lib/api'
-import type { PersonalRanking, User } from '../lib/types'
+import { localTimezone } from '../lib/time'
+import type { ChartStatus, PersonalSummary, User } from '../lib/types'
 
 function formatNumber(value: number) {
   return value.toLocaleString()
+}
+
+function formatWhen(value: string | null) {
+  if (!value) return 'soon'
+  return new Date(value).toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })
 }
 
 function formatDate(value: string): string {
@@ -47,21 +59,76 @@ function Stat({
   )
 }
 
-function LinerNote({
-  number,
-  title,
+function TapeCounter({
+  status,
+  loading,
+}: {
+  status: ChartStatus | null
+  loading: boolean
+}) {
+  const cells = [
+    {
+      label: 'Picks',
+      value: loading ? '—' : formatNumber(status?.votes_cast ?? 0),
+      hint: 'and counting',
+    },
+    {
+      label: 'Duels',
+      value: loading ? '—' : formatNumber(status?.duels ?? 0),
+      hint: 'head to head',
+    },
+    {
+      label: 'Voters',
+      value: loading ? '—' : formatNumber(status?.voters ?? 0),
+      hint: 'in the room',
+    },
+    {
+      label: 'Coverage',
+      value: loading ? '—' : formatNumber(status?.tracks_compared ?? 0),
+      hint: `of ${formatNumber(status?.total_tracks ?? 0)} songs`,
+    },
+  ]
+
+  return (
+    <div className="pv-counter-strip">
+      <div className="pv-counter-head">
+        <span className="pv-counter-label">Tape counter</span>
+        <span className="pv-counter-light" aria-hidden="true" />
+      </div>
+      <div className="pv-counter-cells">
+        {cells.map((cell) => (
+          <div key={cell.label} className="pv-counter-cell">
+            <span className="pv-counter-cell-label">{cell.label}</span>
+            <span className="pv-counter-cell-value">{cell.value}</span>
+            <span className="pv-counter-cell-hint">{cell.hint}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function Action({
+  href,
+  className,
   children,
 }: {
-  number: string
-  title: string
+  href: string
+  className: string
   children: ReactNode
 }) {
+  if (href.startsWith('#')) {
+    return (
+      <a href={href} className={className}>
+        {children}
+      </a>
+    )
+  }
+
   return (
-    <article className="pv-note">
-      <span className="pv-label">{number}</span>
-      <h3 className="mt-2 font-serif text-xl tracking-[-0.02em]">{title}</h3>
-      <div className="mt-2 text-sm leading-relaxed text-muted">{children}</div>
-    </article>
+    <Link to={href} className={className}>
+      {children}
+    </Link>
   )
 }
 
@@ -71,23 +138,23 @@ function YourSide({
   loading,
 }: {
   user: User
-  personal: PersonalRanking | null
+  personal: PersonalSummary | null
   loading: boolean
 }) {
-  const top = personal?.tracks[0]
+  const top = personal?.top_track
 
   return (
-    <section className="pv-card overflow-hidden">
-      <div className="flex items-center justify-between gap-3 border-b-2 border-ink bg-ink px-5 py-3 text-paper">
+    <section className="pv-card min-w-0 overflow-hidden">
+      <div className="flex min-w-0 items-center justify-between gap-3 border-b-2 border-ink bg-ink px-5 py-3 text-paper">
         <div className="flex min-w-0 items-center gap-2">
           <span className="pv-sticker pv-sticker-butter px-1.5 py-0.5 text-[9px]">
             Side A
           </span>
-          <span className="truncate font-serif text-lg leading-none tracking-[-0.02em]">
+          <span className="min-w-0 truncate font-serif text-lg leading-none tracking-[-0.02em]">
             Your side of the story
           </span>
         </div>
-        <span className="shrink-0 font-mono text-[9px] uppercase tracking-[0.16em] text-paper/85">
+        <span className="hidden shrink-0 font-mono text-[9px] uppercase tracking-[0.16em] text-paper/85 sm:inline">
           Member
         </span>
       </div>
@@ -127,10 +194,10 @@ function YourSide({
           <div className="mt-4 rounded-xl border-2 border-line bg-paper p-3">
             <p className="pv-label">Your current #1</p>
             <p className="mt-1 truncate font-serif text-lg leading-tight">
-              {top.track.title}
+              {top.title}
             </p>
             <p className="truncate font-mono text-[9px] uppercase tracking-[0.12em] text-muted">
-              {top.track.artists}
+              {top.artists}
             </p>
           </div>
         ) : (
@@ -140,9 +207,6 @@ function YourSide({
         )}
 
         <div className="mt-5 flex flex-wrap gap-2">
-          <Link to="/duel" className="btn">
-            Start a duel
-          </Link>
           <Link to="/your-ranking" className="btn-ghost">
             Your Ranking
           </Link>
@@ -160,16 +224,16 @@ function YourSide({
 function HowItWorks() {
   const steps = [
     {
-      title: 'Listen to two songs',
-      body: 'Press Space to play and switch sides. Use 1 to pick Side A, or 2 to pick Side B.',
+      title: 'Hear two songs',
+      body: 'Play both sides, then pick the one you prefer.',
     },
     {
       title: 'Build Your Ranking',
-      body: 'Every pick updates your private list right away. No one else can see it.',
+      body: 'Every pick updates your private list right away.',
     },
     {
       title: 'Open The Reveal',
-      body: "The group's shared list stays sealed until the admin opens it. Then you can see the standings.",
+      body: "The group's shared list stays sealed until the admin opens it.",
     },
   ]
 
@@ -189,43 +253,53 @@ function HowItWorks() {
   ]
 
   return (
-    <section className="pv-card p-5">
-      <div className="flex items-center justify-between gap-3 border-b-2 border-ink/15 pb-3">
-        <h2 className="font-serif text-2xl tracking-[-0.02em]">How it works</h2>
-        <span className="pv-sticker pv-sticker-paper">The short version</span>
+    <section className="pv-card min-w-0 p-5">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 border-b-2 border-ink/15 pb-3">
+        <div>
+          <p className="pv-label">The short version</p>
+          <h2 className="mt-1 font-serif text-2xl tracking-[-0.02em]">
+            How it works
+          </h2>
+        </div>
+        <span className="pv-sticker pv-sticker-paper">Three steps</span>
       </div>
 
-      <p className="mt-3 text-sm leading-relaxed text-muted">
-        Every duel is a small vote. Pick the song you prefer, and the group&apos;s
-        picks become the standings.
-      </p>
-
-      <ol className="mt-4 space-y-4">
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
         {steps.map((step, index) => (
-          <li key={step.title} className="flex gap-3">
-            <span className="grid size-8 shrink-0 place-items-center rounded-full border-2 border-ink bg-[var(--playlist-accent)] font-mono text-[10px] font-semibold text-[var(--playlist-accent-ink)] shadow-[2px_2px_0_0_#141a2a]">
+          <div key={step.title} className="flex gap-2.5">
+            <span className="grid size-7 shrink-0 place-items-center rounded-full border-2 border-ink bg-[var(--playlist-accent)] font-mono text-[9px] font-semibold text-[var(--playlist-accent-ink)] shadow-[2px_2px_0_0_#141a2a]">
               {index + 1}
             </span>
-            <div>
-              <h3 className="font-serif text-lg leading-tight tracking-[-0.02em]">
+            <div className="min-w-0">
+              <h3 className="font-serif text-base leading-tight tracking-[-0.02em]">
                 {step.title}
               </h3>
-              <p className="mt-1 text-sm leading-relaxed text-muted">{step.body}</p>
+              <p className="mt-1 text-xs leading-relaxed text-muted">
+                {step.body}
+              </p>
             </div>
-          </li>
-        ))}
-      </ol>
-
-      <dl className="mt-5 space-y-2 border-t-2 border-ink/15 pt-4">
-        {glossary.map(({ term, definition }) => (
-          <div key={term} className="flex flex-col gap-0.5 sm:flex-row sm:gap-2">
-            <dt className="shrink-0 font-mono text-[9px] uppercase tracking-[0.12em] text-ink">
-              {term}
-            </dt>
-            <dd className="text-sm leading-relaxed text-muted">{definition}</dd>
           </div>
         ))}
-      </dl>
+      </div>
+
+      <details className="group mt-4 border-t-2 border-ink/15 pt-3">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 font-mono text-[9px] uppercase tracking-[0.14em] text-muted [&::-webkit-details-marker]:hidden">
+          <span>What do the words mean?</span>
+          <span className="text-base leading-none transition group-open:rotate-45">
+            +
+          </span>
+        </summary>
+        <dl className="mt-3 space-y-2">
+          {glossary.map(({ term, definition }) => (
+            <div key={term} className="flex flex-col gap-0.5 sm:flex-row sm:gap-2">
+              <dt className="shrink-0 font-mono text-[9px] uppercase tracking-[0.12em] text-ink">
+                {term}
+              </dt>
+              <dd className="text-sm leading-relaxed text-muted">{definition}</dd>
+            </div>
+          ))}
+        </dl>
+      </details>
     </section>
   )
 }
@@ -233,12 +307,76 @@ function HowItWorks() {
 export function HomePage() {
   const { user } = useAuth()
   const { status, loading: playlistLoading } = usePlaylist()
-  const [personal, setPersonal] = useState<PersonalRanking | null>(null)
+  const [personal, setPersonal] = useState<PersonalSummary | null>(null)
   const [personalLoading, setPersonalLoading] = useState(false)
 
   const hasPlaylist = Boolean(status?.playlist_name)
   const playlistName = status?.playlist_name ?? 'No tape yet'
   const revealed = Boolean(status?.revealed)
+  const scheduled = Boolean(hasPlaylist && status && status.started_at === null)
+  const votingPaused = Boolean(status?.voting_paused)
+  const streak = personal?.streak ?? null
+  const canVote = hasPlaylist && !scheduled && !votingPaused
+  const streakRemaining = streak ? Math.max(0, streak.goal - streak.today_picks) : 0
+  const countdownTarget = scheduled
+    ? (status?.scheduled_start_at ?? null)
+    : !revealed
+      ? (status?.scheduled_reveal_at ?? null)
+      : null
+  const countdownLabel = scheduled ? 'Doors open in' : 'The seal opens in'
+
+  const description =
+    status?.playlist_description?.trim() ||
+    'A shared playlist, a stack of duels, and one group’s taste on the line.'
+
+  const roomCopy = !hasPlaylist
+    ? 'The room is waiting for its first tape. The admin sets the playlist and the start time.'
+    : scheduled
+      ? 'The doors are still closed. The song list is fetched when the tape opens, so late additions make the cut.'
+      : votingPaused
+        ? 'The room is paused. Existing picks and rankings are safe.'
+        : revealed
+          ? 'The room has heard the tape. The group’s shared list is open.'
+          : 'The room is open. Every pick is a small vote, and every vote counts once.'
+
+  const roomMeta = !hasPlaylist
+    ? 'No artists or albums yet'
+    : scheduled
+      ? 'Artists and albums appear when the tape opens'
+      : `${formatNumber(status?.total_artists ?? 0)} artists · ${formatNumber(
+          status?.total_albums ?? 0,
+        )} albums`
+
+  const sealCopy = !hasPlaylist
+    ? 'There is nothing to seal yet. Once a tape is set and the votes come in, the admin can open The Reveal.'
+    : revealed
+      ? 'The seal is broken. The group’s shared list is public.'
+      : scheduled
+        ? 'The group list stays sealed. The countdown is for the doors, not the reveal.'
+        : votingPaused
+          ? 'The group list is sealed. Voting is paused until the admin resumes it.'
+          : 'The group list is sealed until the admin opens The Reveal.'
+
+  const primary = !hasPlaylist
+    ? user?.is_admin
+      ? { href: '/admin', label: 'Import a tape' }
+      : user
+        ? { href: '/standings', label: 'See the standings' }
+        : { href: '#auth', label: 'Sign in to pick' }
+    : scheduled
+      ? { href: '/stats', label: 'See what’s coming' }
+      : votingPaused
+        ? { href: '/stats', label: 'See the stats' }
+        : user
+          ? { href: '/duel', label: 'Start a duel' }
+          : { href: '#auth', label: 'Sign in to pick' }
+
+  const secondary =
+    user && hasPlaylist && !scheduled && !votingPaused
+      ? { href: '/your-ranking', label: 'Your Ranking' }
+      : hasPlaylist
+        ? { href: '/standings', label: 'The Standings' }
+        : { href: '#how-it-works', label: 'How it works' }
 
   useEffect(() => {
     if (window.location.hash !== '#auth' || user) return
@@ -257,10 +395,11 @@ export function HomePage() {
     }
 
     let active = true
+    const controller = new AbortController()
     setPersonalLoading(true)
 
     api
-      .getPersonalRanking(0, 1)
+      .getPersonalSummary(controller.signal, localTimezone())
       .then((data) => {
         if (active) setPersonal(data)
       })
@@ -273,22 +412,64 @@ export function HomePage() {
 
     return () => {
       active = false
+      controller.abort()
     }
   }, [user])
 
   return (
     <main className="flex-1">
+      {user && canVote && streak && streak.at_risk && !streak.today_met && (
+        <div className="border-b-2 border-ink/15 bg-[var(--playlist-accent-tint)]">
+          <div className="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-2 sm:px-6 lg:px-8">
+            <span className="pv-streak-flame">
+              <StreakFlame className="size-4" />
+            </span>
+            <p className="min-w-0 flex-1 text-xs leading-snug text-ink">
+              <strong className="font-semibold">
+                {streak.current}-day streak
+              </strong>
+              {' · '}
+              {streakRemaining} more{' '}
+              {streakRemaining === 1 ? 'pick' : 'picks'} today to keep it
+              alive.
+            </p>
+            <Link
+              to="/duel"
+              className="shrink-0 font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--playlist-accent-strong)] underline decoration-2 underline-offset-4"
+            >
+              Keep it alive →
+            </Link>
+          </div>
+        </div>
+      )}
+
       <section className="relative overflow-hidden border-b-2 border-ink/15">
         <div className="pointer-events-none absolute -right-32 top-10 size-96 rounded-full border-2 border-ink/10 pv-halftone opacity-[0.07]" />
         <div className="pointer-events-none absolute -left-20 bottom-5 hidden size-56 rotate-12 rounded-xl border-2 border-ink/10 pv-tape-strip opacity-40 lg:block" />
 
         <div className="relative mx-auto grid w-full max-w-6xl gap-10 px-4 py-12 sm:px-6 lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:px-8 lg:py-16">
-          <div>
+          <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="pv-sticker">
-                {playlistLoading ? 'Tuning the deck' : hasPlaylist ? 'Now voting' : 'No tape yet'}
+              <span
+                className={`pv-sticker ${
+                  scheduled
+                    ? 'pv-sticker-butter'
+                    : votingPaused
+                      ? 'pv-sticker-paper'
+                      : ''
+                }`}
+              >
+                {playlistLoading
+                  ? 'Tuning the deck'
+                  : !hasPlaylist
+                    ? 'No tape yet'
+                    : scheduled
+                      ? 'Scheduled'
+                      : votingPaused
+                        ? 'Voting paused'
+                        : 'Now voting'}
               </span>
-              <span className="pv-label">
+              <span className="max-w-full break-words pv-label">
                 {hasPlaylist ? playlistName : 'The current season'}
               </span>
             </div>
@@ -300,60 +481,20 @@ export function HomePage() {
             </h1>
 
             <p className="mt-5 max-w-md text-base leading-relaxed text-muted">
-              A playlist becomes a contest. Hear two songs, pick the one you
-              prefer, and Your Ranking updates right away. The group&apos;s shared
-              standings stay sealed until The Reveal.
+              A shared playlist becomes a listening room. Hear two songs, pick
+              one, and the group&apos;s taste slowly takes shape.
             </p>
 
             <div className="mt-7 flex flex-wrap items-center gap-3">
-              {user ? (
-                <>
-                  <Link to={hasPlaylist ? '/duel' : user.is_admin ? '/admin' : '/standings'} className="btn">
-                    {hasPlaylist ? 'Start a duel' : user.is_admin ? 'Import a tape' : 'See the standings'}
-                  </Link>
-                  {hasPlaylist && (
-                    <Link to="/your-ranking" className="btn-ghost">
-                      Your Ranking
-                    </Link>
-                  )}
-                  <Link to="/standings" className="btn-ghost">
-                    The Standings
-                  </Link>
-                </>
-              ) : (
-                <>
-                  <a href="#auth" className="btn">
-                    Sign in to pick
-                  </a>
-                  <Link to="/standings" className="btn-ghost">
-                    See the standings
-                  </Link>
-                </>
-              )}
+              <Action href={primary.href} className="btn">
+                {primary.label}
+              </Action>
+              <Action href={secondary.href} className="btn-ghost">
+                {secondary.label}
+              </Action>
             </div>
 
-            <div className="mt-8 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <Stat
-                label="Picks"
-                value={playlistLoading ? '—' : formatNumber(status?.votes_cast ?? 0)}
-                hint="and counting"
-              />
-              <Stat
-                label="Duels"
-                value={playlistLoading ? '—' : formatNumber(status?.duels ?? 0)}
-                hint="head to head"
-              />
-              <Stat
-                label="Voters"
-                value={playlistLoading ? '—' : formatNumber(status?.voters ?? 0)}
-                hint="in the room"
-              />
-              <Stat
-                label="Songs covered"
-                value={playlistLoading ? '—' : formatNumber(status?.tracks_compared ?? 0)}
-                hint={`of ${formatNumber(status?.total_tracks ?? 0)}`}
-              />
-            </div>
+            <TapeCounter status={status} loading={playlistLoading} />
           </div>
 
           <div className="relative mx-auto w-full max-w-md lg:ml-auto">
@@ -363,111 +504,119 @@ export function HomePage() {
               trackCount={status?.total_tracks ?? 0}
               description={status?.playlist_description}
               revealed={revealed}
+              songsLabel={scheduled ? 'Scheduled' : undefined}
+              statusLabel={scheduled ? 'Scheduled' : undefined}
+              showDescription={false}
             />
 
             <div className="mt-5 flex flex-wrap items-center justify-between gap-3 px-1">
               <span className="pv-label">
-                {revealed ? 'The Reveal is open' : 'Sealed until The Reveal'}
+                {!hasPlaylist
+                  ? 'Waiting for a tape'
+                  : scheduled
+                    ? `Voting opens ${formatWhen(status?.scheduled_start_at ?? null)}`
+                    : votingPaused
+                      ? 'Voting is paused'
+                      : revealed
+                        ? 'The Reveal is open'
+                        : 'Sealed until The Reveal'}
               </span>
-              <Link
-                to="/standings"
-                className="pv-link font-mono text-[9px] font-semibold uppercase tracking-[0.14em]"
-              >
-                {revealed ? 'Open the standings' : 'Peek at the seal'}
-              </Link>
+              <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
+                Side A · Playlist Voter
+              </span>
             </div>
           </div>
         </div>
       </section>
 
-      <section className="mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
+      {user && canVote && (personalLoading || streak) && (
+        <section className="mx-auto w-full max-w-6xl px-4 pt-6 sm:px-6 lg:px-8">
+          <StreakCard streak={streak} loading={personalLoading} />
+        </section>
+      )}
+
+      <section className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
         <div className="flex flex-wrap items-end justify-between gap-3 border-b-2 border-ink/15 pb-3">
           <div>
             <p className="pv-label">The current season</p>
-            <h2 className="mt-1 font-serif text-3xl tracking-[-0.03em]">Liner notes</h2>
+            <h2 className="mt-1 font-serif text-3xl tracking-[-0.03em]">
+              The tape notes
+            </h2>
           </div>
-          <span className="pv-sticker pv-sticker-paper">
+          <span className="max-w-full truncate pv-sticker pv-sticker-paper">
             {hasPlaylist ? playlistName : 'No tape yet'}
           </span>
         </div>
 
-        <div className="mt-6 grid gap-5 md:grid-cols-3">
-          <LinerNote number="01" title="The tape">
-            <p className="line-clamp-4">
-              {status?.playlist_description?.trim() ||
-                'A shared playlist, a stack of duels, and one group’s taste on the line.'}
+        <article className="pv-tape-notes mt-7">
+          <span className="pv-tape-notes-tab">Notes</span>
+
+          <div className="pv-tape-notes-fold">
+            <p className="pv-label">01 · The tape</p>
+            <h3 className="mt-1 font-serif text-xl tracking-[-0.02em]">
+              The tape
+            </h3>
+            <p className="mt-2 line-clamp-4 break-words text-sm leading-relaxed text-muted">
+              {description}
             </p>
             <p className="mt-3 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
-              {formatNumber(status?.total_tracks ?? 0)} songs on Side A
+              {!hasPlaylist
+                ? 'No tape set yet'
+                : scheduled
+                  ? `Scheduled · opens ${formatWhen(status?.scheduled_start_at ?? null)}`
+                  : `${formatNumber(status?.total_tracks ?? 0)} songs on Side A`}
             </p>
-          </LinerNote>
+          </div>
 
-          <LinerNote number="02" title="The tally">
-            <dl className="space-y-1.5 font-mono text-[9px] uppercase tracking-[0.12em]">
-              <div className="flex items-center justify-between gap-3 border-b border-dashed border-line pb-1">
-                <dt>Picks</dt>
-                <dd className="text-ink">{formatNumber(status?.votes_cast ?? 0)}</dd>
-              </div>
-              <div className="flex items-center justify-between gap-3 border-b border-dashed border-line pb-1">
-                <dt>Duels</dt>
-                <dd className="text-ink">{formatNumber(status?.duels ?? 0)}</dd>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <dt>Voters</dt>
-                <dd className="text-ink">{formatNumber(status?.voters ?? 0)}</dd>
-              </div>
-            </dl>
-          </LinerNote>
+          <div className="pv-tape-notes-fold">
+            <p className="pv-label">02 · The room</p>
+            <h3 className="mt-1 font-serif text-xl tracking-[-0.02em]">
+              The room
+            </h3>
+            <p className="mt-2 break-words text-sm leading-relaxed text-muted">
+              {roomCopy}
+            </p>
+            <p className="mt-3 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
+              {roomMeta}
+            </p>
+          </div>
 
-          <LinerNote number="03" title="The reveal">
-            {revealed ? (
-              <>
-                The Reveal is open. You can now see the group&apos;s standings.
-                <div className="mt-3">
-                  <Link to="/standings" className="pv-link font-mono text-[9px] font-semibold uppercase tracking-[0.14em]">
-                    Open the standings
-                  </Link>
-                </div>
-              </>
-            ) : (
-              <>
-                The standings stay sealed until the admin opens The Reveal.
-                {user
-                  ? ' Your own ranking is always yours to read.'
-                  : ' Sign in to start your own tape.'}
-                <div className="mt-3">
-                  {user ? (
-                    <Link
-                      to="/your-ranking"
-                      className="pv-link font-mono text-[9px] font-semibold uppercase tracking-[0.14em]"
-                    >
-                      Open Your Ranking
-                    </Link>
-                  ) : (
-                    <a
-                      href="#auth"
-                      className="pv-link font-mono text-[9px] font-semibold uppercase tracking-[0.14em]"
-                    >
-                      Sign in
-                    </a>
-                  )}
-                </div>
-              </>
+          <div className="pv-tape-notes-fold">
+            <p className="pv-label">03 · The seal</p>
+            <h3 className="mt-1 font-serif text-xl tracking-[-0.02em]">
+              The seal
+            </h3>
+            <p className="mt-2 break-words text-sm leading-relaxed text-muted">
+              {sealCopy}
+            </p>
+            {countdownTarget && (
+              <Countdown target={countdownTarget} label={countdownLabel} />
             )}
-          </LinerNote>
-        </div>
+            <div className="mt-3">
+              <Link
+                to={revealed ? '/standings' : '/stats'}
+                className="pv-link font-mono text-[9px] font-semibold uppercase tracking-[0.14em]"
+              >
+                {revealed ? 'Open the standings' : 'The Stats'}
+              </Link>
+            </div>
+          </div>
+        </article>
       </section>
 
-      <section className="mx-auto w-full max-w-6xl px-4 pb-16 sm:px-6 lg:px-8">
+      <section
+        id="how-it-works"
+        className="mx-auto w-full max-w-6xl px-4 pb-16 sm:px-6 lg:px-8"
+      >
         <div className="grid items-start gap-6 lg:grid-cols-[1.05fr_0.95fr]">
-          <div className="order-2 lg:order-1">
+          <div className="order-2 min-w-0 lg:order-1">
             {user ? (
               <YourSide user={user} personal={personal} loading={personalLoading} />
             ) : (
               <AuthCard />
             )}
           </div>
-          <div className="order-1 lg:order-2">
+          <div className="order-1 min-w-0 lg:order-2">
             <HowItWorks />
           </div>
         </div>

@@ -19,6 +19,12 @@ function inviteStatus(invite: Invite): 'open' | 'used' | 'expired' {
   return 'open'
 }
 
+function inviteLink(code: string): string {
+  const url = new URL('/', window.location.origin)
+  url.searchParams.set('invite', code)
+  return url.toString()
+}
+
 export function AdminInvites() {
   const [invites, setInvites] = useState<Invite[]>([])
   const [loading, setLoading] = useState(true)
@@ -63,14 +69,22 @@ export function AdminInvites() {
     }
   }
 
-  async function copyCode(code: string) {
+  async function copyText(value: string) {
     try {
-      await navigator.clipboard.writeText(code)
-      setCopied(code)
+      await navigator.clipboard.writeText(value)
+      setCopied(value)
       window.setTimeout(() => setCopied(null), 1500)
     } catch {
       // Clipboard access can be denied; the code stays visible to copy by hand.
     }
+  }
+
+  async function copyCode(code: string) {
+    await copyText(code)
+  }
+
+  async function copyLink(code: string) {
+    await copyText(inviteLink(code))
   }
 
   async function revoke(invite: Invite) {
@@ -133,6 +147,7 @@ export function AdminInvites() {
           <ul className="max-h-96 divide-y divide-line overflow-y-auto border-y border-line">
             {invites.map((invite) => {
               const status = inviteStatus(invite)
+              const link = inviteLink(invite.code)
               const statusClass =
                 status === 'open'
                   ? 'border-ok/40 text-ok'
@@ -161,7 +176,7 @@ export function AdminInvites() {
                     </p>
                   </div>
 
-                  <div className="flex shrink-0 items-center gap-2">
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
                     <span
                       className={`border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] ${statusClass}`}
                     >
@@ -172,17 +187,26 @@ export function AdminInvites() {
                       onClick={() => void copyCode(invite.code)}
                       className="border border-line px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-muted transition hover:border-ink hover:text-ink"
                     >
-                      {copied === invite.code ? 'Copied' : 'Copy'}
+                      {copied === invite.code ? 'Copied' : 'Copy code'}
                     </button>
                     {status === 'open' && (
-                      <button
-                        type="button"
-                        onClick={() => void revoke(invite)}
-                        disabled={revoking === invite.id}
-                        className="border border-danger/40 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-danger transition hover:border-danger disabled:opacity-40"
-                      >
-                        {revoking === invite.id ? 'Revoking…' : 'Revoke'}
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => void copyLink(invite.code)}
+                          className="border border-line px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-muted transition hover:border-ink hover:text-ink"
+                        >
+                          {copied === link ? 'Copied' : 'Copy link'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void revoke(invite)}
+                          disabled={revoking === invite.id}
+                          className="border border-danger/40 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-danger transition hover:border-danger disabled:opacity-40"
+                        >
+                          {revoking === invite.id ? 'Revoking…' : 'Revoke'}
+                        </button>
+                      </>
                     )}
                   </div>
                 </li>

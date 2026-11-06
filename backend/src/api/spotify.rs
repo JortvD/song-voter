@@ -111,10 +111,10 @@ pub async fn callback(
     Query(query): Query<CallbackQuery>,
 ) -> Redirect {
     match handle_callback(&state, query).await {
-        Ok(()) => Redirect::to("/?spotify=connected"),
+        Ok(()) => Redirect::to("/admin?spotify=connected"),
         Err(error) => {
             tracing::warn!(error = ?error, "Spotify OAuth callback failed");
-            Redirect::to("/?spotify=error")
+            Redirect::to("/admin?spotify=error")
         }
     }
 }
@@ -148,8 +148,7 @@ async fn handle_callback(state: &AppState, query: CallbackQuery) -> anyhow::Resu
         .as_deref()
         .context("SPOTIFY_REDIRECT_URI is not configured")?;
 
-    let connection =
-        spotify_auth::connect(client, &state.db, &code, redirect_uri, user_id).await?;
+    let connection = spotify_auth::connect(client, &state.db, &code, redirect_uri, user_id).await?;
 
     tracing::info!(
         spotify_user_id = ?connection.spotify_user_id,

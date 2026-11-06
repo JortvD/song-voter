@@ -1,17 +1,21 @@
 use std::fmt::Write as _;
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::extract::{Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::Response;
 use axum::Json;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::auth::AdminUser;
 use crate::db::active_playlist;
 use crate::error::ApiError;
+use crate::metadata;
 use crate::models::{MatchupTrack, Playlist};
 use crate::state::AppState;
 
@@ -27,6 +31,33 @@ pub struct ChartStatus {
     votes_cast: i64,
     voters: i64,
     duels: i64,
+    total_artists: i64,
+    total_albums: i64,
+    year_min: Option<i32>,
+    year_max: Option<i32>,
+    scheduled_start_at: Option<DateTime<Utc>>,
+    started_at: Option<DateTime<Utc>>,
+    voting_paused: bool,
+    voting_paused_at: Option<DateTime<Utc>>,
+    scheduled_reveal_at: Option<DateTime<Utc>>,
+    pause_voting_on_reveal: bool,
+    decades: Vec<FacetCount>,
+    genres: Vec<FacetCount>,
+    artists: Vec<ArtistFacet>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct FacetCount {
+    value: String,
+    count: i64,
+    average_rating: Option<f64>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct ArtistFacet {
+    id: String,
+    name: String,
+    count: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -34,6 +65,9 @@ pub struct ChartQuery {
     pub limit: Option<i64>,
     pub offset: Option<i64>,
     pub q: Option<String>,
+    pub decade: Option<i32>,
+    pub genre: Option<String>,
+    pub artist: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize)]
@@ -45,6 +79,8 @@ pub struct PublicChart {
     limit: i64,
     offset: i64,
     query: String,
+    decade: Option<i32>,
+    genre: Option<String>,
     tracks: Vec<ChartEntry>,
 }
 
@@ -72,15 +108,24 @@ struct ChartRow {
     album_image_url: Option<String>,
     preview_url: Option<String>,
     duration_ms: Option<i32>,
+    release_year: Option<i32>,
+    decade: Option<i32>,
+    album_id: Option<String>,
+    album_type: Option<String>,
+    total_tracks: Option<i32>,
+    disc_number: Option<i32>,
+    track_number: Option<i32>,
+    primary_genre: Option<String>,
     rating: f64,
     comparisons: i32,
     wins: i32,
+    official_rank: i64,
 }
 
 impl ChartRow {
-    fn into_entry(self, rank: usize) -> ChartEntry {
+    fn into_entry(self) -> ChartEntry {
         ChartEntry {
-            rank,
+            rank: self.official_rank as usize,
             track: MatchupTrack {
                 id: self.id,
                 spotify_id: self.spotify_id,
@@ -90,6 +135,14 @@ impl ChartRow {
                 album_image_url: self.album_image_url,
                 preview_url: self.preview_url,
                 duration_ms: self.duration_ms,
+                release_year: self.release_year,
+                decade: self.decade,
+                album_id: self.album_id,
+                album_type: self.album_type,
+                total_tracks: self.total_tracks,
+                disc_number: self.disc_number,
+                track_number: self.track_number,
+                primary_genre: self.primary_genre,
             },
             rating: self.rating,
             comparisons: self.comparisons,
@@ -98,31 +151,64 @@ impl ChartRow {
     }
 }
 
-/// Public metadata about the chart. Safe to expose while it is still sealed.
-pub async fn status(State(state): State<AppState>) -> Result<Json<ChartStatus>, ApiError> {
-    let Some(playlist) = active_playlist(&state.db).await? else {
-        return Ok(Json(ChartStatus {
-            revealed: false,
-            playlist_id: None,
-            playlist_name: None,
-            playlist_description: None,
-            playlist_image_url: None,
-            total_tracks: 0,
-            tracks_compared: 0,
-            votes_cast: 0,
-            voters: 0,
-            duels: 0,
-        }));
-    };
+fn empty_status() -> ChartStatus {
+    ChartStatus {
+        revealed: false,
+        playlist_id: None,
+        playlist_name: None,
+        playlist_description: None,
+        playlist_image_url: None,
+        total_tracks: 0,
+        tracks_compared: 0,
+        votes_cast: 0,
+        voters: 0,
+        duels: 0,
+        total_artists: 0,
+        total_albums: 0,
+        year_min: None,
+        year_max: None,
+        scheduled_start_at: None,
+        started_at: None,
+        voting_paused: false,
+        voting_paused_at: None,
+        scheduled_reveal_at: None,
+        pause_voting_on_reveal: false,
+        decades: Vec::new(),
+        genres: Vec::new(),
+        artists: Vec::new(),
+    }
+}
 
-    Ok(Json(build_status(&state.db, &playlist).await?))
+/// Public metadata about the chart. Safe to expose while it is still sealed.
+pub async fn status(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let value = state
+        .cache
+        .get_or_compute(
+            "chart:status".to_string(),
+            Duration::from_secs(10),
+            || async {
+                let _permit = state.heavy_work.acquire().await.map_err(|_| {
+                    ApiError::service_unavailable("the server is busy; please try again")
+                })?;
+
+                let Some(playlist) = active_playlist(&state.db).await? else {
+                    return serde_json::to_value(empty_status()).map_err(ApiError::internal);
+                };
+
+                let status = build_status(&state.db, &playlist).await?;
+                serde_json::to_value(status).map_err(ApiError::internal)
+            },
+        )
+        .await?;
+
+    Ok(Json(value))
 }
 
 /// The shared Elo chart. Only available after the admin reveal.
 pub async fn public(
     State(state): State<AppState>,
     Query(query): Query<ChartQuery>,
-) -> Result<Json<PublicChart>, ApiError> {
+) -> Result<Json<Value>, ApiError> {
     let Some(playlist) = active_playlist(&state.db).await? else {
         return Err(ApiError::NotFound(
             "no active playlist has been imported yet".to_string(),
@@ -138,10 +224,39 @@ pub async fn public(
     let limit = query.limit.unwrap_or(50).clamp(1, 200);
     let offset = query.offset.unwrap_or(0).max(0);
     let search = query.q.unwrap_or_default().trim().to_string();
+    let genre = query
+        .genre
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
 
-    Ok(Json(
-        load_chart(&state.db, &playlist, limit, offset, &search).await?,
-    ))
+    let key = format!(
+        "chart:public:{}:{limit}:{offset}:{}:{:?}:{:?}:{:?}",
+        playlist.id, search, query.decade, genre, query.artist
+    );
+
+    let value = state
+        .cache
+        .get_or_compute(key, Duration::from_secs(10), || async {
+            let _permit = state.heavy_work.acquire().await.map_err(|_| {
+                ApiError::service_unavailable("the server is busy; please try again")
+            })?;
+
+            let chart = load_chart(
+                &state.db,
+                &playlist,
+                limit,
+                offset,
+                &search,
+                query.decade,
+                genre.as_deref(),
+                query.artist,
+            )
+            .await?;
+            serde_json::to_value(chart).map_err(ApiError::internal)
+        })
+        .await?;
+
+    Ok(Json(value))
 }
 
 pub async fn load_chart(
@@ -150,43 +265,64 @@ pub async fn load_chart(
     limit: i64,
     offset: i64,
     search: &str,
+    decade: Option<i32>,
+    genre: Option<&str>,
+    artist: Option<Uuid>,
 ) -> Result<PublicChart, ApiError> {
-    let total = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM tracks \
-         WHERE playlist_id = $1 \
-           AND ($2 = '' OR title ILIKE '%' || $2 || '%' \
-                OR artists ILIKE '%' || $2 || '%' \
-                OR album ILIKE '%' || $2 || '%')",
-    )
+    const FILTER: &str = "t.playlist_id = $1 \
+         AND ($2 = '' OR t.title ILIKE '%' || $2 || '%' \
+              OR t.artists ILIKE '%' || $2 || '%' \
+              OR t.album ILIKE '%' || $2 || '%') \
+         AND ($3::int IS NULL OR t.decade = $3) \
+         AND ($4::text IS NULL OR t.primary_genre = $4) \
+         AND ($5::uuid IS NULL OR EXISTS ( \
+             SELECT 1 FROM track_artists ta \
+             WHERE ta.track_id = t.id AND ta.artist_id = $5 \
+         ))";
+
+    // Rank the whole playlist first, then filter. This keeps the official rank
+    // visible when a voter searches or narrows the standings by facet.
+    const RANKED: &str = "WITH ranked AS ( \
+         SELECT t.*, ROW_NUMBER() OVER ( \
+             ORDER BY t.rating DESC, t.wins DESC, t.title ASC, t.id ASC \
+         ) AS official_rank \
+         FROM tracks t \
+         WHERE t.playlist_id = $1 \
+     ) ";
+
+    let total = sqlx::query_scalar::<_, i64>(&format!(
+        "{RANKED} SELECT COUNT(*) FROM ranked t WHERE {FILTER}"
+    ))
     .bind(playlist.id)
     .bind(search)
+    .bind(decade)
+    .bind(genre)
+    .bind(artist)
     .fetch_one(pool)
     .await?;
 
-    let rows = sqlx::query_as::<_, ChartRow>(
-        "SELECT id, spotify_id, title, artists, album, album_image_url, preview_url, \
-                duration_ms, rating, comparisons, wins \
-         FROM tracks \
-         WHERE playlist_id = $1 \
-           AND ($2 = '' OR title ILIKE '%' || $2 || '%' \
-                OR artists ILIKE '%' || $2 || '%' \
-                OR album ILIKE '%' || $2 || '%') \
-         ORDER BY rating DESC, wins DESC, title ASC, id ASC \
-         LIMIT $3 OFFSET $4",
-    )
+    let rows = sqlx::query_as::<_, ChartRow>(&format!(
+        "{RANKED} \
+         SELECT t.id, t.spotify_id, t.title, t.artists, t.album, t.album_image_url, \
+                t.preview_url, t.duration_ms, t.release_year, t.decade, t.album_id, \
+                t.album_type, t.total_tracks, t.disc_number, t.track_number, \
+                t.primary_genre, t.rating, t.comparisons, t.wins, t.official_rank \
+         FROM ranked t \
+         WHERE {FILTER} \
+         ORDER BY t.official_rank ASC \
+         LIMIT $6 OFFSET $7"
+    ))
     .bind(playlist.id)
     .bind(search)
+    .bind(decade)
+    .bind(genre)
+    .bind(artist)
     .bind(limit)
     .bind(offset)
     .fetch_all(pool)
     .await?;
 
-    let start = usize::try_from(offset).unwrap_or(0);
-    let tracks = rows
-        .into_iter()
-        .enumerate()
-        .map(|(index, row)| row.into_entry(start + index + 1))
-        .collect();
+    let tracks = rows.into_iter().map(ChartRow::into_entry).collect();
 
     Ok(PublicChart {
         playlist_id: playlist.id,
@@ -196,6 +332,8 @@ pub async fn load_chart(
         limit,
         offset,
         query: search.to_string(),
+        decade,
+        genre: genre.map(str::to_string),
         tracks,
     })
 }
@@ -217,14 +355,22 @@ pub async fn reveal(
         "hidden"
     };
 
-    sqlx::query("UPDATE playlists SET reveal_state = $1 WHERE id = $2")
-        .bind(reveal_state)
-        .bind(playlist.id)
-        .execute(&state.db)
-        .await?;
+    sqlx::query(
+        "UPDATE playlists SET reveal_state = $1, \
+                scheduled_reveal_at = NULL, pause_voting_on_reveal = FALSE \
+         WHERE id = $2",
+    )
+    .bind(reveal_state)
+    .bind(playlist.id)
+    .execute(&state.db)
+    .await?;
+
+    state.cache.clear();
 
     let updated = Playlist {
         reveal_state: reveal_state.to_string(),
+        scheduled_reveal_at: None,
+        pause_voting_on_reveal: false,
         ..playlist
     };
     let status = build_status(&state.db, &updated).await?;
@@ -239,6 +385,110 @@ pub async fn reveal(
     Ok(Json(status))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RevealScheduleRequest {
+    reveal_at: DateTime<Utc>,
+    pause_voting: bool,
+}
+
+pub async fn schedule_reveal(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Json(payload): Json<RevealScheduleRequest>,
+) -> Result<Json<ChartStatus>, ApiError> {
+    let Some(playlist) = active_playlist(&state.db).await? else {
+        return Err(ApiError::NotFound(
+            "no playlist has been set yet".to_string(),
+        ));
+    };
+
+    if playlist.reveal_state == "revealed" {
+        return Err(ApiError::Conflict(
+            "the standings are already revealed".to_string(),
+        ));
+    }
+
+    if payload.reveal_at <= Utc::now() {
+        return Err(ApiError::bad_request(
+            "the scheduled reveal must be in the future",
+        ));
+    }
+
+    if playlist.started_at.is_none()
+        && playlist
+            .scheduled_start_at
+            .is_some_and(|start| payload.reveal_at < start)
+    {
+        return Err(ApiError::bad_request(
+            "the reveal must be after the scheduled start",
+        ));
+    }
+
+    sqlx::query(
+        "UPDATE playlists SET scheduled_reveal_at = $2, pause_voting_on_reveal = $3 \
+         WHERE id = $1",
+    )
+    .bind(playlist.id)
+    .bind(payload.reveal_at)
+    .bind(payload.pause_voting)
+    .execute(&state.db)
+    .await?;
+
+    state.cache.clear();
+
+    let updated = Playlist {
+        scheduled_reveal_at: Some(payload.reveal_at),
+        pause_voting_on_reveal: payload.pause_voting,
+        ..playlist
+    };
+
+    tracing::info!(
+        admin_id = %admin.0.id,
+        playlist_id = %updated.id,
+        reveal_at = %payload.reveal_at,
+        pause_voting = payload.pause_voting,
+        "scheduled reveal set"
+    );
+
+    Ok(Json(build_status(&state.db, &updated).await?))
+}
+
+pub async fn cancel_scheduled_reveal(
+    State(state): State<AppState>,
+    admin: AdminUser,
+) -> Result<Json<ChartStatus>, ApiError> {
+    let Some(playlist) = active_playlist(&state.db).await? else {
+        return Err(ApiError::NotFound(
+            "no playlist has been set yet".to_string(),
+        ));
+    };
+
+    sqlx::query(
+        "UPDATE playlists SET scheduled_reveal_at = NULL, \
+                pause_voting_on_reveal = FALSE \
+         WHERE id = $1",
+    )
+    .bind(playlist.id)
+    .execute(&state.db)
+    .await?;
+
+    state.cache.clear();
+
+    let updated = Playlist {
+        scheduled_reveal_at: None,
+        pause_voting_on_reveal: false,
+        ..playlist
+    };
+
+    tracing::info!(
+        admin_id = %admin.0.id,
+        playlist_id = %updated.id,
+        "scheduled reveal cancelled"
+    );
+
+    Ok(Json(build_status(&state.db, &updated).await?))
+}
+
 pub async fn export_csv(
     State(state): State<AppState>,
     admin: AdminUser,
@@ -251,7 +501,11 @@ pub async fn export_csv(
 
     let rows = sqlx::query_as::<_, ChartRow>(
         "SELECT id, spotify_id, title, artists, album, album_image_url, preview_url, \
-                duration_ms, rating, comparisons, wins \
+                duration_ms, release_year, decade, album_id, album_type, total_tracks, \
+                disc_number, track_number, primary_genre, rating, comparisons, wins, \
+                ROW_NUMBER() OVER ( \
+                    ORDER BY rating DESC, wins DESC, title ASC, id ASC \
+                ) AS official_rank \
          FROM tracks WHERE playlist_id = $1 \
          ORDER BY rating DESC, wins DESC, title ASC, id ASC",
     )
@@ -261,11 +515,11 @@ pub async fn export_csv(
 
     let mut csv = String::from("rank,title,artists,album,spotify_id,rating,comparisons,wins\n");
 
-    for (index, row) in rows.iter().enumerate() {
+    for row in rows.iter() {
         let _ = writeln!(
             &mut csv,
             "{},{},{},{},{},{:.2},{},{}",
-            index + 1,
+            row.official_rank,
             csv_field(&row.title),
             csv_field(&row.artists),
             csv_field(row.album.as_deref().unwrap_or("")),
@@ -302,6 +556,10 @@ async fn build_status(pool: &PgPool, playlist: &Playlist) -> Result<ChartStatus,
         votes_cast: i64,
         voters: i64,
         duels: i64,
+        total_artists: i64,
+        total_albums: i64,
+        year_min: Option<i32>,
+        year_max: Option<i32>,
     }
 
     let counts = sqlx::query_as::<_, StatusCounts>(
@@ -310,11 +568,69 @@ async fn build_status(pool: &PgPool, playlist: &Playlist) -> Result<ChartStatus,
             (SELECT COUNT(*) FROM tracks WHERE playlist_id = $1 AND comparisons > 0) AS tracks_compared, \
             (SELECT COUNT(*) FROM votes WHERE playlist_id = $1) AS votes_cast, \
             (SELECT COUNT(DISTINCT user_id) FROM votes WHERE playlist_id = $1) AS voters, \
-            (SELECT COUNT(*) FROM seen_pairs WHERE playlist_id = $1) AS duels",
+            (SELECT COUNT(*) FROM seen_pairs WHERE playlist_id = $1) AS duels, \
+            (SELECT COUNT(DISTINCT ta.artist_id) FROM track_artists ta \
+             JOIN tracks t ON t.id = ta.track_id WHERE t.playlist_id = $1) AS total_artists, \
+            (SELECT COUNT(DISTINCT album_id) FROM tracks \
+             WHERE playlist_id = $1 AND album_id IS NOT NULL) AS total_albums, \
+            (SELECT MIN(release_year) FROM tracks WHERE playlist_id = $1) AS year_min, \
+            (SELECT MAX(release_year) FROM tracks WHERE playlist_id = $1) AS year_max",
     )
     .bind(playlist.id)
     .fetch_one(pool)
     .await?;
+
+    let mut decades = sqlx::query_as::<_, FacetCount>(
+        "SELECT decade::text AS value, COUNT(*) AS count, \
+                AVG(rating) FILTER (WHERE comparisons > 0)::float8 AS average_rating \
+         FROM tracks \
+         WHERE playlist_id = $1 AND decade IS NOT NULL \
+         GROUP BY decade ORDER BY decade ASC",
+    )
+    .bind(playlist.id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut genres = sqlx::query_as::<_, FacetCount>(
+        "SELECT primary_genre AS value, COUNT(*) AS count, \
+                AVG(rating) FILTER (WHERE comparisons > 0)::float8 AS average_rating \
+         FROM tracks \
+         WHERE playlist_id = $1 AND primary_genre IS NOT NULL \
+         GROUP BY primary_genre ORDER BY count DESC, value ASC",
+    )
+    .bind(playlist.id)
+    .fetch_all(pool)
+    .await?;
+
+    let artists = sqlx::query_as::<_, ArtistFacet>(
+        "SELECT a.id::text AS id, a.name, COUNT(*)::bigint AS count \
+         FROM track_artists ta \
+         JOIN artists a ON a.id = ta.artist_id \
+         JOIN tracks t ON t.id = ta.track_id \
+         WHERE t.playlist_id = $1 \
+         GROUP BY a.id, a.name \
+         ORDER BY a.name ASC",
+    )
+    .bind(playlist.id)
+    .fetch_all(pool)
+    .await?;
+
+    // The status endpoint is public even while the standings are sealed. Facet
+    // counts are safe to expose, but average ratings would leak score
+    // information before The Reveal.
+    if playlist.reveal_state != "revealed" {
+        for facet in decades.iter_mut().chain(genres.iter_mut()) {
+            facet.average_rating = None;
+        }
+    }
+
+    // Keep the filter chips in the same stable order as the broad buckets.
+    genres.sort_by_key(|facet| {
+        metadata::BROAD_GENRES
+            .iter()
+            .position(|genre| *genre == facet.value)
+            .unwrap_or(usize::MAX)
+    });
 
     Ok(ChartStatus {
         revealed: playlist.reveal_state == "revealed",
@@ -327,6 +643,19 @@ async fn build_status(pool: &PgPool, playlist: &Playlist) -> Result<ChartStatus,
         votes_cast: counts.votes_cast,
         voters: counts.voters,
         duels: counts.duels,
+        total_artists: counts.total_artists,
+        total_albums: counts.total_albums,
+        year_min: counts.year_min,
+        year_max: counts.year_max,
+        scheduled_start_at: playlist.scheduled_start_at,
+        started_at: playlist.started_at,
+        voting_paused: playlist.voting_paused,
+        voting_paused_at: playlist.voting_paused_at,
+        scheduled_reveal_at: playlist.scheduled_reveal_at,
+        pause_voting_on_reveal: playlist.pause_voting_on_reveal,
+        decades,
+        genres,
+        artists,
     })
 }
 

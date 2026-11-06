@@ -2,7 +2,14 @@ import { NavLink } from 'react-router-dom'
 
 import { useAuth } from '../context/AuthContext'
 
-type IconName = 'home' | 'duel' | 'ranking' | 'standings' | 'admin' | 'join'
+type IconName =
+  | 'home'
+  | 'duel'
+  | 'ranking'
+  | 'standings'
+  | 'stats'
+  | 'admin'
+  | 'join'
 
 function TabIcon({ name }: { name: IconName }) {
   const common = {
@@ -53,6 +60,17 @@ function TabIcon({ name }: { name: IconName }) {
         <rect x="5" y="11" width="4" height="7" rx="1" />
         <rect x="10" y="7" width="4" height="11" rx="1" />
         <rect x="15" y="13" width="4" height="5" rx="1" />
+      </svg>
+    )
+  }
+
+  if (name === 'stats') {
+    return (
+      <svg {...common}>
+        <path d="M4 19h16" />
+        <path d="M5 15l4-4 3 2 4-6 3 3" />
+        <circle cx="9" cy="11" r="1" fill="currentColor" stroke="none" />
+        <circle cx="16" cy="7" r="1" fill="currentColor" stroke="none" />
       </svg>
     )
   }
@@ -137,6 +155,11 @@ export function BottomTabs() {
                 <TabBody name="standings" label="Standings" active={isActive} />
               )}
             </NavLink>
+            <NavLink to="/stats" className={tabClass}>
+              {({ isActive }) => (
+                <TabBody name="stats" label="Stats" active={isActive} />
+              )}
+            </NavLink>
             {user.is_admin && (
               <NavLink to="/admin" className={tabClass}>
                 {({ isActive }) => (
@@ -150,6 +173,11 @@ export function BottomTabs() {
             <NavLink to="/standings" className={tabClass}>
               {({ isActive }) => (
                 <TabBody name="standings" label="Standings" active={isActive} />
+              )}
+            </NavLink>
+            <NavLink to="/stats" className={tabClass}>
+              {({ isActive }) => (
+                <TabBody name="stats" label="Stats" active={isActive} />
               )}
             </NavLink>
             <a href="/#auth" className="flex min-w-0 flex-1 flex-col items-center gap-1 text-muted">

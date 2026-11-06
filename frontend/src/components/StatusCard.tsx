@@ -38,6 +38,7 @@ function statusOf(health: Health | null, readiness: Readiness | null): Status {
 export function StatusCard() {
   const [health, setHealth] = useState<Health | null>(null)
   const [readiness, setReadiness] = useState<Readiness | null>(null)
+  const [checked, setChecked] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -57,6 +58,7 @@ export function StatusCard() {
       setReadiness(
         readinessResult.status === 'fulfilled' ? readinessResult.value : null,
       )
+      setChecked(true)
     }
 
     void refresh()
@@ -68,15 +70,18 @@ export function StatusCard() {
     }
   }, [])
 
-  const status =
-    health === null && readiness === null ? 'checking' : statusOf(health, readiness)
+  const status = checked ? statusOf(health, readiness) : 'checking'
   const styles = statusStyles[status]
 
   return (
     <section className="panel">
       <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
         <span className="label">System</span>
-        <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em]">
+        <span
+          role="status"
+          aria-live="polite"
+          className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em]"
+        >
           <span
             className={`size-1.5 ${styles.dot} ${status === 'checking' ? 'animate-pulse' : ''}`}
           />

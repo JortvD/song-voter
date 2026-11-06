@@ -1,4 +1,4 @@
-import { Link, NavLink, useNavigate } from 'react-router-dom'
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 
 import { BrandMark } from './BrandMark'
 import { PlaylistBadge } from './PlaylistBadge'
@@ -12,6 +12,8 @@ export function Header() {
   const { user, loading, logout } = useAuth()
   const { status, loading: playlistLoading } = usePlaylist()
   const navigate = useNavigate()
+  const location = useLocation()
+  const duelFocus = location.pathname.startsWith('/duel')
 
   async function handleLogout() {
     await logout()
@@ -22,19 +24,36 @@ export function Header() {
     <header className="sticky top-0 z-40 border-b-2 border-ink/15 bg-paper/95 backdrop-blur">
       <div className="h-1.5 bg-[var(--playlist-accent)]" />
 
-      <div className="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-2.5 sm:gap-4 sm:px-6 lg:px-8">
+      <div
+        className={`mx-auto flex w-full max-w-6xl items-center gap-3 px-4 sm:gap-4 sm:px-6 lg:px-8 ${
+          duelFocus ? 'py-1 lg:py-2.5' : 'py-2.5'
+        }`}
+      >
         <Link to="/" className="flex shrink-0 items-center gap-2.5">
-          <BrandMark className="size-8 sm:size-9" />
-          <span className="hidden font-serif text-lg leading-none tracking-[-0.03em] sm:block">
+          <BrandMark className={duelFocus ? 'size-6 lg:size-9' : 'size-8 sm:size-9'} />
+          <span
+            className={`font-serif text-lg leading-none tracking-[-0.03em] ${
+              duelFocus ? 'hidden lg:block' : 'hidden sm:block'
+            }`}
+          >
             Playlist Voter
           </span>
         </Link>
 
         <span className="hidden h-8 w-px bg-ink/15 lg:block" />
 
-        <div className="min-w-0 flex-1">
+        <div className={`min-w-0 flex-1 ${duelFocus ? 'hidden lg:block' : ''}`}>
           <PlaylistBadge status={status} loading={playlistLoading} />
         </div>
+
+        {duelFocus && (
+          <span className="flex min-w-0 flex-1 items-center gap-2 font-mono text-[9px] font-semibold uppercase tracking-[0.16em] text-muted lg:hidden">
+            <span className="size-1.5 shrink-0 rounded-full bg-[var(--playlist-accent)]" />
+            <span className="truncate">
+              Duel{status?.playlist_name ? ` · ${status.playlist_name}` : ''}
+            </span>
+          </span>
+        )}
 
         <nav className="hidden items-center gap-0.5 lg:flex">
           {user && (
@@ -49,6 +68,9 @@ export function Header() {
           )}
           <NavLink to="/standings" className={navClass}>
             Standings
+          </NavLink>
+          <NavLink to="/stats" className={navClass}>
+            Stats
           </NavLink>
           {user?.is_admin && (
             <NavLink to="/admin" className={navClass}>
@@ -89,7 +111,7 @@ export function Header() {
           )}
         </div>
 
-        <div className="flex items-center lg:hidden">
+        <div className={`items-center lg:hidden ${duelFocus ? 'hidden' : 'flex'}`}>
           {loading ? (
             <span className="h-7 w-7 animate-pulse rounded-full bg-ink/10" />
           ) : user ? (

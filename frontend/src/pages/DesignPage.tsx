@@ -2,9 +2,9 @@ import { useRef } from 'react'
 import type { ReactNode } from 'react'
 
 import { BrandMark } from '../components/BrandMark'
+import { DuelCassette } from '../components/duel/DuelCassette'
 import { MixtapeCase } from '../components/MixtapeCase'
-import { TapeCard } from '../components/TapeCard'
-import type { MatchupTrack } from '../lib/types'
+import type { Matchup, MatchupTrack, StreakSummary } from '../lib/types'
 
 const sampleA: MatchupTrack = {
   id: 'sample-a',
@@ -15,6 +15,14 @@ const sampleA: MatchupTrack = {
   album_image_url: null,
   preview_url: null,
   duration_ms: 244000,
+  release_year: 2011,
+  decade: 2010,
+  album_id: null,
+  album_type: 'album',
+  total_tracks: 13,
+  disc_number: 1,
+  track_number: 1,
+  primary_genre: 'synthpop',
 }
 
 const sampleB: MatchupTrack = {
@@ -26,6 +34,45 @@ const sampleB: MatchupTrack = {
   album_image_url: null,
   preview_url: null,
   duration_ms: 257000,
+  release_year: 1977,
+  decade: 1970,
+  album_id: null,
+  album_type: 'album',
+  total_tracks: 11,
+  disc_number: 1,
+  track_number: 2,
+  primary_genre: 'soft rock',
+}
+
+const sampleStreak: StreakSummary = {
+  current: 5,
+  longest: 9,
+  today_picks: 2,
+  goal: 3,
+  today_met: false,
+  at_risk: true,
+  days: [
+    { date: '2026-02-02', picks: 3, met: true, is_today: false },
+    { date: '2026-02-03', picks: 4, met: true, is_today: false },
+    { date: '2026-02-04', picks: 3, met: true, is_today: false },
+    { date: '2026-02-05', picks: 0, met: false, is_today: false },
+    { date: '2026-02-06', picks: 3, met: true, is_today: false },
+    { date: '2026-02-07', picks: 3, met: true, is_today: false },
+    { date: '2026-02-08', picks: 2, met: false, is_today: true },
+  ],
+}
+
+const sampleMatchup: Matchup = {
+  playlist_id: 'sample-playlist',
+  playlist_name: 'The group-chat tape',
+  track_a: sampleA,
+  track_b: sampleB,
+  compared_pairs: 128,
+  tracks_seen: 32,
+  total_tracks: 42,
+  votes_cast: 96,
+  recent_duels: [],
+  streak: sampleStreak,
 }
 
 const swatches = [
@@ -66,19 +113,20 @@ export function DesignPage() {
     <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-20 pt-8 sm:px-6 lg:px-8">
       <div className="flex flex-wrap items-end justify-between gap-3 border-b-2 border-ink/15 pb-4">
         <div>
-          <p className="pv-label">Temporary · Phase 1</p>
+          <p className="pv-label">Internal · Manual review</p>
           <h1 className="mt-1 font-serif text-4xl leading-none tracking-[-0.04em] sm:text-5xl">
             The style tile.
           </h1>
           <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted">
-            The new mixtape-zine language: paper, ink, cobalt, safety orange,
-            rounded display type, stickers, tape and hard shadows. This route is
-            here for review and will be removed before launch.
+            The mixtape-zine language: paper, ink, cobalt, safety orange, rounded
+            display type, stickers, tape and hard shadows. This page is not linked
+            from the app; open <span className="font-mono">/design</span> directly
+            when reviewing the visual system.
           </p>
         </div>
         <div className="flex items-center gap-2">
           <BrandMark className="size-12" />
-          <span className="pv-sticker">Phase 1</span>
+          <span className="pv-sticker">Internal</span>
         </div>
       </div>
 
@@ -170,7 +218,7 @@ export function DesignPage() {
           />
           <div className="max-w-lg">
             <p className="text-sm leading-relaxed text-muted">
-              The home hero is a cassette J-card. The playlist cover becomes the
+              The home hero is a cassette sleeve. The playlist cover becomes the
               label; the accent color is sampled from it. The “Sealed” sticker
               flips to “Standings live” after The Reveal.
             </p>
@@ -181,43 +229,30 @@ export function DesignPage() {
         </div>
       </Section>
 
-      <Section number="05" title="The tape deck">
-        <div className="pv-deck">
-          <div className="pv-deck-top">
-            <span>Cassette deck · Side A / Side B</span>
-            <span>Round 01</span>
-          </div>
-          <div className="grid items-stretch gap-3 lg:grid-cols-[1fr_84px_1fr]">
-            <TapeCard
-              side="a"
-              track={sampleA}
-              picked={false}
-              playing={false}
-              disabled={false}
-              audioRef={audioA}
-              onPlayStateChange={() => undefined}
-              onPick={() => undefined}
-            />
-            <div className="flex items-center justify-center py-1">
-              <span className="pv-vs">VS</span>
-            </div>
-            <TapeCard
-              side="b"
-              track={sampleB}
-              picked={false}
-              playing={false}
-              disabled={false}
-              audioRef={audioB}
-              onPlayStateChange={() => undefined}
-              onPick={() => undefined}
-            />
-          </div>
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-paper/20 bg-paper/5 px-3 py-2.5">
-            <span className="font-mono text-[9px] uppercase tracking-[0.16em] text-paper/85">
-              Stamp feedback · reels spin while playing · Space / 1 / 2 / Z
-            </span>
-            <span className="pv-sticker px-1.5 py-0.5 text-[9px]">3 in a row</span>
-          </div>
+      <Section number="05" title="The duel cassette">
+        <DuelCassette
+          matchup={sampleMatchup}
+          pickedId={null}
+          playingSide={null}
+          disabled={false}
+          audioA={audioA}
+          audioB={audioB}
+          onPlayA={() => undefined}
+          onPlayB={() => undefined}
+          onTogglePreview={() => undefined}
+          onEnded={() => undefined}
+          onPick={() => undefined}
+        />
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <p className="text-sm leading-relaxed text-muted">
+            One cassette holds both sides. Tap the text block to pick, tap a cover
+            or LISTEN key to hear a preview, or swipe the whole card left for A and
+            right for B. The card tilts and stamps on a pick.
+          </p>
+          <p className="font-mono text-[9px] uppercase leading-relaxed tracking-[0.14em] text-muted">
+            Paper label · central tape hub · transport-key listen buttons ·
+            tap-to-pick track labels · desktop gatefold
+          </p>
         </div>
       </Section>
 
@@ -330,9 +365,9 @@ export function DesignPage() {
       </Section>
 
       <p className="mt-8 border-t-2 border-ink/15 pt-4 font-mono text-[9px] uppercase tracking-[0.16em] text-muted">
-        The redesign now covers home, duel, standings, Your Ranking, auth and
-        mission control. This style tile is temporary and will be removed before
-        launch.
+        The redesign covers home, duel, standings, Your Ranking, auth and mission
+        control. This style tile is intentionally unlinked; open /design directly
+        when you need it.
       </p>
     </main>
   )
