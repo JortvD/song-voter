@@ -32,6 +32,7 @@ export function AdminUsers() {
   const [offset, setOffset] = useState(0)
   const [queryInput, setQueryInput] = useState('')
   const [query, setQuery] = useState('')
+  const [sort, setSort] = useState('last_active')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -41,7 +42,7 @@ export function AdminUsers() {
     setError(null)
 
     api
-      .getAdminUsers(offset, PAGE_SIZE, query)
+      .getAdminUsers(offset, PAGE_SIZE, query, sort)
       .then((next) => {
         if (active) setData(next)
       })
@@ -57,7 +58,7 @@ export function AdminUsers() {
     return () => {
       active = false
     }
-  }, [offset, query])
+  }, [offset, query, sort])
 
   function applySearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -93,6 +94,21 @@ export function AdminUsers() {
             className="field w-44 py-1.5 text-xs"
             aria-label="Search voters"
           />
+          <select
+            value={sort}
+            onChange={(event) => {
+              setSort(event.target.value)
+              setOffset(0)
+            }}
+            className="field w-36 py-1.5 text-xs"
+            aria-label="Sort voters"
+          >
+            <option value="last_active">Last active</option>
+            <option value="picks">Most picks</option>
+            <option value="duels">Most duels</option>
+            <option value="joined">Newest</option>
+            <option value="username">Username</option>
+          </select>
           <button type="submit" className="btn-ghost">
             Search
           </button>
@@ -106,7 +122,7 @@ export function AdminUsers() {
 
       <div className="p-5">
         {error && (
-          <p className="mb-4 border-l-2 border-accent bg-accent/5 px-3 py-2 text-xs text-accent">
+          <p className="mb-4 border-l-2 border-danger bg-danger/5 px-3 py-2 text-xs text-danger">
             {error}
           </p>
         )}
@@ -120,41 +136,43 @@ export function AdminUsers() {
         ) : data && data.users.length > 0 ? (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[560px] text-left text-sm">
+              <table className="w-full min-w-[680px] table-fixed text-left text-sm">
                 <thead>
                   <tr className="border-b border-line font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
-                    <th className="pb-2 font-medium">Voter</th>
-                    <th className="pb-2 text-right font-medium">Picks</th>
-                    <th className="hidden pb-2 text-right font-medium sm:table-cell">
+                    <th className="w-[34%] px-2 pb-2 font-medium">Voter</th>
+                    <th className="w-16 px-2 pb-2 text-right font-medium">Picks</th>
+                    <th className="hidden w-16 px-2 pb-2 text-right font-medium sm:table-cell">
                       Duels
                     </th>
-                    <th className="hidden pb-2 font-medium md:table-cell">Joined</th>
-                    <th className="pb-2 text-right font-medium">Last active</th>
+                    <th className="hidden w-28 px-2 pb-2 font-medium md:table-cell">
+                      Joined
+                    </th>
+                    <th className="w-32 px-2 pb-2 text-right font-medium">Last active</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.users.map((user) => (
                     <tr key={user.id} className="border-b border-line last:border-b-0">
-                      <td className="py-2.5">
-                        <span className="flex items-center gap-2">
-                          <span className="font-medium">{user.username}</span>
+                      <td className="px-2 py-2.5">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="truncate font-medium">{user.username}</span>
                           {user.is_admin && (
-                            <span className="border border-accent/40 px-1 py-0.5 font-mono text-[8px] uppercase tracking-[0.12em] text-accent">
+                            <span className="shrink-0 border border-cobalt/40 px-1 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-cobalt">
                               Admin
                             </span>
                           )}
                         </span>
                       </td>
-                      <td className="py-2.5 text-right font-mono text-xs">
+                      <td className="px-2 py-2.5 text-right font-mono text-xs">
                         {formatNumber(user.votes_cast)}
                       </td>
-                      <td className="hidden py-2.5 text-right font-mono text-xs sm:table-cell">
+                      <td className="hidden px-2 py-2.5 text-right font-mono text-xs sm:table-cell">
                         {formatNumber(user.matchups_seen)}
                       </td>
-                      <td className="hidden py-2.5 font-mono text-[10px] text-muted md:table-cell">
+                      <td className="hidden px-2 py-2.5 font-mono text-[10px] text-muted md:table-cell">
                         {formatDate(user.created_at)}
                       </td>
-                      <td className="py-2.5 text-right font-mono text-[10px] text-muted">
+                      <td className="whitespace-nowrap px-2 py-2.5 text-right font-mono text-[10px] text-muted">
                         {formatDateTime(user.last_active_at)}
                       </td>
                     </tr>

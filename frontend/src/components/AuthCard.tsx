@@ -41,25 +41,32 @@ export function AuthCard() {
   }
 
   return (
-    <section id="auth" className="panel">
-      <div className="flex items-center justify-between border-b border-line px-5 py-3">
-        <h2 className="label">Membership</h2>
-        <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted">
+    <section id="auth" className="pv-card overflow-hidden">
+      <div className="flex items-center justify-between gap-3 border-b-2 border-ink bg-ink px-5 py-3 text-paper">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="pv-sticker pv-sticker-butter px-1.5 py-0.5 text-[9px]">
+            Membership
+          </span>
+          <span className="truncate font-serif text-lg leading-none tracking-[-0.02em]">
+            Backstage pass
+          </span>
+        </div>
+        <span className="shrink-0 font-mono text-[9px] uppercase tracking-[0.16em] text-paper/85">
           Invite only
         </span>
       </div>
 
       <div className="p-5">
-        <div className="flex gap-5 border-b border-line">
+        <div className="flex gap-1 rounded-full border-2 border-ink bg-paper p-1">
           {(['login', 'register'] as const).map((value) => (
             <button
               key={value}
               type="button"
               onClick={() => switchMode(value)}
-              className={`-mb-px border-b-2 pb-2.5 font-mono text-[11px] uppercase tracking-[0.16em] transition ${
+              className={`flex-1 rounded-full px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] transition ${
                 mode === value
-                  ? 'border-ink text-ink'
-                  : 'border-transparent text-muted hover:text-ink'
+                  ? 'bg-ink text-paper'
+                  : 'text-muted hover:text-ink'
               }`}
             >
               {value === 'login' ? 'Sign in' : 'Register'}
@@ -69,7 +76,7 @@ export function AuthCard() {
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
           <div>
-            <label htmlFor="username" className="label mb-1.5 block">
+            <label htmlFor="username" className="pv-label mb-1.5 block">
               Username
             </label>
             <input
@@ -81,12 +88,12 @@ export function AuthCard() {
               value={username}
               onChange={(event) => setUsername(event.target.value)}
               placeholder="your-name"
-              className="field"
+              className="pv-input"
             />
           </div>
 
           <div>
-            <label htmlFor="password" className="label mb-1.5 block">
+            <label htmlFor="password" className="pv-label mb-1.5 block">
               Password
             </label>
             <input
@@ -98,13 +105,13 @@ export function AuthCard() {
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               placeholder="••••••••"
-              className="field"
+              className="pv-input"
             />
           </div>
 
           {mode === 'register' && (
             <div>
-              <label htmlFor="invite-code" className="label mb-1.5 block">
+              <label htmlFor="invite-code" className="pv-label mb-1.5 block">
                 Invite code
               </label>
               <input
@@ -116,24 +123,27 @@ export function AuthCard() {
                 value={inviteCode}
                 onChange={(event) => setInviteCode(event.target.value.toUpperCase())}
                 placeholder="A1B2C3D4E5"
-                className="field font-mono tracking-[0.18em]"
+                className="pv-input font-mono tracking-[0.18em]"
               />
             </div>
           )}
 
           {error && (
-            <p role="alert" className="border-l-2 border-accent bg-accent/5 px-3 py-2 text-sm text-accent">
+            <p
+              role="alert"
+              className="rounded-xl border-2 border-danger bg-danger/5 px-3 py-2 text-sm text-danger"
+            >
               {error}
             </p>
           )}
 
           <button type="submit" disabled={busy} className="btn w-full">
-            {busy ? 'Working…' : mode === 'login' ? 'Sign in' : 'Create account'}
+            {busy ? 'Working…' : mode === 'login' ? 'Sign in' : 'Join the club'}
           </button>
         </form>
       </div>
 
-      <p className="border-t border-line px-5 py-3 text-xs leading-relaxed text-muted">
+      <p className="border-t-2 border-ink/15 px-5 py-3 text-xs leading-relaxed text-muted">
         Registration is invite-only. Ask the admin for a code, or use the admin
         account configured on the server.
       </p>

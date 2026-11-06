@@ -1,6 +1,7 @@
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::Json;
+use serde_json::json;
 use uuid::Uuid;
 
 use crate::audit::{self, AuthEvent};
@@ -80,6 +81,45 @@ pub async fn list_invites(
     .await?;
 
     Ok(Json(invites))
+}
+
+/// Revoke an unused invite. Used invites stay in the log.
+pub async fn revoke_invite(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let used = sqlx::query_scalar::<_, bool>(
+        "SELECT used_at IS NOT NULL FROM invites WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await?;
+
+    let Some(used) = used else {
+        return Err(ApiError::NotFound("invite not found".to_string()));
+    };
+
+    if used {
+        return Err(ApiError::Conflict(
+            "this invite has already been used".to_string(),
+        ));
+    }
+
+    let deleted = sqlx::query("DELETE FROM invites WHERE id = $1")
+        .bind(id)
+        .execute(&state.db)
+        .await?
+        .rows_affected();
+
+    tracing::info!(
+        admin_id = %admin.0.id,
+        invite_id = %id,
+        deleted,
+        "invite revoked"
+    );
+
+    Ok(Json(json!({ "revoked": true, "id": id })))
 }
 
 /// 10 uppercase hex characters from a random UUID (~40 bits of entropy).

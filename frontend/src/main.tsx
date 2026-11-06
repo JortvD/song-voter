@@ -4,13 +4,16 @@ import { BrowserRouter } from 'react-router-dom'
 
 import App from './App.tsx'
 import { AuthProvider } from './context/AuthContext.tsx'
+import { PlaylistProvider } from './context/PlaylistContext.tsx'
 import './index.css'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
       <AuthProvider>
-        <App />
+        <PlaylistProvider>
+          <App />
+        </PlaylistProvider>
       </AuthProvider>
     </BrowserRouter>
   </StrictMode>,

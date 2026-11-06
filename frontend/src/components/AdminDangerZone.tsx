@@ -73,10 +73,10 @@ export function AdminDangerZone({ onReset, onRemove }: Props) {
   return (
     <section className="border border-accent/50 bg-accent/[0.03]">
       <div className="flex items-center justify-between border-b border-accent/30 px-5 py-3">
-        <h2 className="font-mono text-[10px] uppercase tracking-[0.22em] text-accent">
+        <h2 className="font-mono text-[10px] uppercase tracking-[0.22em] text-danger">
           Danger zone
         </h2>
-        <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-accent/70">
+        <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-danger">
           Irreversible
         </span>
       </div>
@@ -101,7 +101,7 @@ export function AdminDangerZone({ onReset, onRemove }: Props) {
               type="button"
               onClick={() => void resetVotes()}
               disabled={resetConfirm !== 'RESET' || busy !== null}
-              className="btn border-accent bg-accent hover:bg-accent/80"
+              className="btn border-danger bg-danger hover:bg-danger/90"
             >
               {busy === 'reset' ? 'Resetting…' : 'Reset all picks'}
             </button>
@@ -128,7 +128,7 @@ export function AdminDangerZone({ onReset, onRemove }: Props) {
               type="button"
               onClick={() => void removePlaylist()}
               disabled={removeConfirm !== 'REMOVE' || busy !== null}
-              className="btn border-accent bg-accent hover:bg-accent/80"
+              className="btn border-danger bg-danger hover:bg-danger/90"
             >
               {busy === 'remove' ? 'Removing…' : 'Remove playlist'}
             </button>
@@ -144,7 +144,7 @@ export function AdminDangerZone({ onReset, onRemove }: Props) {
             </p>
           )}
           {error && (
-            <p className="mt-3 border-l-2 border-accent bg-accent/5 px-3 py-2 text-xs text-accent">
+            <p className="mt-3 border-l-2 border-danger bg-danger/5 px-3 py-2 text-xs text-danger">
               {error}
             </p>
           )}

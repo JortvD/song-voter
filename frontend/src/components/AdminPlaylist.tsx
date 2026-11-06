@@ -185,7 +185,7 @@ export function AdminPlaylist() {
                       ? 'Not connected'
                       : 'Not configured'}
               </p>
-              <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.14em] text-muted/70">
+              <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
                 {spotify?.connected
                   ? spotify.connected_at
                     ? `Since ${formatDate(spotify.connected_at)}`
@@ -222,7 +222,7 @@ export function AdminPlaylist() {
               className={`mt-3 border-l-2 px-2 py-1 text-xs ${
                 noticeTone === 'ok'
                   ? 'border-ok bg-ok/5 text-ok'
-                  : 'border-accent bg-accent/5 text-accent'
+                  : 'border-danger bg-danger/5 text-danger'
               }`}
             >
               {notice}
@@ -256,7 +256,7 @@ export function AdminPlaylist() {
                     {formatNumber(overview?.track_count ?? 0)} tracks
                     {playlist.owner_name ? ` / ${playlist.owner_name}` : ''}
                   </p>
-                  <p className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.14em] text-muted/70">
+                  <p className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
                     Imported {formatDate(playlist.imported_at)}
                   </p>
                 </div>
@@ -310,7 +310,7 @@ export function AdminPlaylist() {
         )}
 
         {error && (
-          <p className="mt-4 border-l-2 border-accent bg-accent/5 px-3 py-2 text-xs text-accent">
+          <p className="mt-4 border-l-2 border-danger bg-danger/5 px-3 py-2 text-xs text-danger">
             {error}
           </p>
         )}
@@ -337,11 +337,11 @@ export function AdminPlaylist() {
               {importing ? 'Importing…' : 'Import'}
             </button>
           </div>
-          <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.14em] text-muted/70">
+          <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
             Connect the playlist owner&apos;s account · re-import keeps ratings
           </p>
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-            <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted/70">
+            <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
               Previews are fetched from Spotify when missing
             </span>
             <button

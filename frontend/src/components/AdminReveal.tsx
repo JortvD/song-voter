@@ -78,14 +78,14 @@ export function AdminReveal() {
         </p>
 
         {status && (
-          <p className="mt-3 font-mono text-[9px] uppercase tracking-[0.14em] text-muted/70">
+          <p className="mt-3 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
             {formatNumber(status.total_tracks)} songs ·{' '}
             {formatNumber(status.votes_cast)} picks
           </p>
         )}
 
         {error && (
-          <p className="mt-3 border-l-2 border-accent bg-accent/5 px-3 py-2 text-xs text-accent">
+          <p className="mt-3 border-l-2 border-danger bg-danger/5 px-3 py-2 text-xs text-danger">
             {error}
           </p>
         )}

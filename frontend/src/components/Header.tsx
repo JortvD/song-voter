@@ -1,16 +1,16 @@
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 
+import { BrandMark } from './BrandMark'
+import { PlaylistBadge } from './PlaylistBadge'
 import { useAuth } from '../context/AuthContext'
+import { usePlaylist } from '../context/PlaylistContext'
 
 const navClass = ({ isActive }: { isActive: boolean }) =>
-  `font-mono text-[10px] uppercase tracking-[0.16em] transition ${
-    isActive
-      ? 'text-ink underline decoration-accent decoration-2 underline-offset-8'
-      : 'text-muted hover:text-ink'
-  }`
+  `pv-tab ${isActive ? 'pv-tab-active' : ''}`
 
 export function Header() {
   const { user, loading, logout } = useAuth()
+  const { status, loading: playlistLoading } = usePlaylist()
   const navigate = useNavigate()
 
   async function handleLogout() {
@@ -19,84 +19,98 @@ export function Header() {
   }
 
   return (
-    <header className="border-b border-ink/15">
-      <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-6 px-5 py-4 sm:px-8">
-        <div className="flex items-center gap-6">
-          <Link to="/" className="flex items-center gap-3">
-            <span className="grid size-9 place-items-center bg-ink font-serif text-sm leading-none tracking-[-0.03em] text-paper">
-              PV
-            </span>
-            <span className="font-mono text-[10px] font-medium uppercase leading-relaxed tracking-[0.22em]">
-              Playlist Voter
-            </span>
-          </Link>
+    <header className="sticky top-0 z-40 border-b-2 border-ink/15 bg-paper/95 backdrop-blur">
+      <div className="h-1.5 bg-[var(--playlist-accent)]" />
 
-          <nav className="hidden items-center gap-5 sm:flex">
-            {user && (
-              <>
-                <NavLink to="/duel" className={navClass}>
-                  Duel
-                </NavLink>
-                <NavLink to="/your-ranking" className={navClass}>
-                  Your Ranking
-                </NavLink>
-              </>
-            )}
-            <NavLink to="/standings" className={navClass}>
-              Standings
-            </NavLink>
-            {user?.is_admin && (
-              <NavLink to="/admin" className={navClass}>
-                Admin
-              </NavLink>
-            )}
-          </nav>
+      <div className="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-2.5 sm:gap-4 sm:px-6 lg:px-8">
+        <Link to="/" className="flex shrink-0 items-center gap-2.5">
+          <BrandMark className="size-8 sm:size-9" />
+          <span className="hidden font-serif text-lg leading-none tracking-[-0.03em] sm:block">
+            Playlist Voter
+          </span>
+        </Link>
+
+        <span className="hidden h-8 w-px bg-ink/15 lg:block" />
+
+        <div className="min-w-0 flex-1">
+          <PlaylistBadge status={status} loading={playlistLoading} />
         </div>
 
-        {loading ? (
-          <span className="h-8 w-24 animate-pulse bg-ink/10" />
-        ) : user ? (
-          <div className="flex items-center gap-3">
-            <span className="hidden items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] text-muted sm:flex">
-              <span className="size-1.5 bg-ok" />
-              {user.username}
-              {user.is_admin && (
-                <span className="border border-accent/40 px-1.5 py-0.5 text-[9px] text-accent">
-                  Admin
-                </span>
-              )}
-            </span>
-            <button type="button" onClick={() => void handleLogout()} className="btn-ghost">
+        <nav className="hidden items-center gap-0.5 lg:flex">
+          {user && (
+            <>
+              <NavLink to="/duel" className={navClass}>
+                Duel
+              </NavLink>
+              <NavLink to="/your-ranking" className={navClass}>
+                Your Ranking
+              </NavLink>
+            </>
+          )}
+          <NavLink to="/standings" className={navClass}>
+            Standings
+          </NavLink>
+          {user?.is_admin && (
+            <NavLink to="/admin" className={navClass}>
+              Admin
+            </NavLink>
+          )}
+        </nav>
+
+        <div className="hidden items-center gap-2.5 lg:flex">
+          {loading ? (
+            <span className="h-7 w-24 animate-pulse rounded-full bg-ink/10" />
+          ) : user ? (
+            <>
+              <span className="flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
+                <span className="size-1.5 rounded-full bg-ok" />
+                <span className="max-w-24 truncate">{user.username}</span>
+                {user.is_admin && (
+                  <span className="rounded border border-cobalt/40 px-1 py-0.5 text-[9px] text-cobalt">
+                    Admin
+                  </span>
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() => void handleLogout()}
+                className="rounded-full border-2 border-ink px-3 py-1.5 font-mono text-[9px] font-semibold uppercase tracking-[0.12em] transition hover:bg-card"
+              >
+                Log out
+              </button>
+            </>
+          ) : (
+            <a
+              href="/#auth"
+              className="rounded-full border-2 border-ink px-4 py-2 font-mono text-[9px] font-semibold uppercase tracking-[0.14em] transition hover:bg-card"
+            >
+              Membership
+            </a>
+          )}
+        </div>
+
+        <div className="flex items-center lg:hidden">
+          {loading ? (
+            <span className="h-7 w-7 animate-pulse rounded-full bg-ink/10" />
+          ) : user ? (
+            <button
+              type="button"
+              onClick={() => void handleLogout()}
+              className="rounded-full border-2 border-ink px-2 py-1.5 font-mono text-[9px] font-semibold uppercase tracking-[0.08em]"
+              aria-label="Log out"
+            >
               Log out
             </button>
-          </div>
-        ) : (
-          <a href="/#auth" className="btn-ghost">
-            Membership
-          </a>
-        )}
+          ) : (
+            <a
+              href="/#auth"
+              className="rounded-full border-2 border-ink px-2 py-1.5 font-mono text-[9px] font-semibold uppercase tracking-[0.08em]"
+            >
+              Sign in
+            </a>
+          )}
+        </div>
       </div>
-
-      <nav className="flex gap-5 border-t border-line px-5 py-2.5 sm:hidden">
-        {user && (
-          <>
-            <NavLink to="/duel" className={navClass}>
-              Duel
-            </NavLink>
-            <NavLink to="/your-ranking" className={navClass}>
-              Your Ranking
-            </NavLink>
-          </>
-        )}
-        <NavLink to="/standings" className={navClass}>
-          Standings
-        </NavLink>
-        {user?.is_admin && (
-          <NavLink to="/admin" className={navClass}>
-            Admin
-          </NavLink>
-        )}
-      </nav>
     </header>
   )
 }

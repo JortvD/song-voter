@@ -16,6 +16,18 @@ function formatTime(seconds: number): string {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
 }
 
+function PlayIcon({ paused }: { paused: boolean }) {
+  return paused ? (
+    <svg viewBox="0 0 20 20" className="size-4" aria-hidden="true">
+      <path d="M6.5 4.5l9 5.5-9 5.5z" fill="currentColor" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 20 20" className="size-4" aria-hidden="true">
+      <path d="M6.5 4.5v11M13.5 4.5v11" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 /**
  * A small native player for Spotify's 30-second preview MP3.
  *
@@ -59,18 +71,20 @@ export function PreviewPlayer({
 
   if (!previewUrl) {
     return (
-      <div className="flex h-10 items-center justify-between gap-2 border border-line bg-card px-2.5">
-        <span className="font-mono text-[8px] uppercase tracking-[0.12em] text-muted">
-          No preview available
-        </span>
-        <a
-          href={`https://open.spotify.com/track/${spotifyId}`}
-          target="_blank"
-          rel="noreferrer"
-          className="shrink-0 font-mono text-[8px] uppercase tracking-[0.12em] text-ink underline decoration-line underline-offset-2"
-        >
-          Open in Spotify
-        </a>
+      <div className="pv-preview">
+        <div className="pv-preview-empty">
+          <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-muted">
+            No preview on this tape
+          </span>
+          <a
+            href={`https://open.spotify.com/track/${spotifyId}`}
+            target="_blank"
+            rel="noreferrer"
+            className="pv-link shrink-0 font-mono text-[9px] uppercase tracking-[0.12em]"
+          >
+            Open in Spotify
+          </a>
+        </div>
       </div>
     )
   }
@@ -90,7 +104,7 @@ export function PreviewPlayer({
   }
 
   return (
-    <div className="h-10 border border-line bg-card">
+    <div className="pv-preview">
       <audio
         ref={audioRef}
         src={previewUrl}
@@ -117,29 +131,26 @@ export function PreviewPlayer({
         }}
       />
 
-      <div className="flex h-full items-center gap-2.5 px-2.5">
+      <div className="flex items-center gap-2.5">
         <button
           type="button"
           onClick={toggle}
           aria-label={playing ? 'Pause preview' : 'Play preview'}
           aria-pressed={playing}
-          className="grid h-8 w-12 shrink-0 place-items-center border border-ink bg-ink font-mono text-[8px] uppercase tracking-[0.1em] text-paper transition hover:border-accent hover:bg-accent"
+          className="pv-play-button"
         >
-          {playing ? 'Pause' : 'Play'}
+          <PlayIcon paused={!playing} />
         </button>
 
         <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between font-mono text-[8px] uppercase tracking-[0.12em] text-muted">
-            <span>30s Spotify preview</span>
+          <div className="flex items-center justify-between font-mono text-[9px] uppercase tracking-[0.12em] text-muted">
+            <span>30s preview</span>
             <span>
               {formatTime(position)} / {formatTime(total)}
             </span>
           </div>
-          <div className="mt-1 h-0.5 bg-line">
-            <div
-              className="h-0.5 bg-ink transition-[width] duration-150"
-              style={{ width: `${progress}%` }}
-            />
+          <div className="pv-preview-track">
+            <div className="pv-preview-fill" style={{ width: `${progress}%` }} />
           </div>
         </div>
       </div>
@@ -148,9 +159,5 @@ export function PreviewPlayer({
 }
 
 export function Kbd({ children }: { children: ReactNode }) {
-  return (
-    <kbd className="inline-flex min-w-5 items-center justify-center border border-line bg-paper px-1 py-0.5 font-mono text-[9px] leading-none text-ink">
-      {children}
-    </kbd>
-  )
+  return <kbd className="pv-key">{children}</kbd>
 }

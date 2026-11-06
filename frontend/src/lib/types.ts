@@ -137,8 +137,13 @@ export type ChartStatus = {
   revealed: boolean
   playlist_id: string | null
   playlist_name: string | null
+  playlist_description: string | null
+  playlist_image_url: string | null
   total_tracks: number
+  tracks_compared: number
   votes_cast: number
+  voters: number
+  duels: number
 }
 
 export type ChartEntry = {
@@ -160,34 +165,18 @@ export type PublicChart = {
   tracks: ChartEntry[]
 }
 
-export type BalancedSettings = {
-  influence_exponent: number
-  confidence_prior: number
-  neutral_prior: number
-  min_picks: number
-  updated_at: string
-}
-
-export type BalancedEntry = {
-  rank: number | null
-  track: MatchupTrack
-  rating: number | null
-  comparisons: number
-  wins: number
-  voters: number
-  weight: number
-  no_data: boolean
-}
-
-export type BalancedChart = {
+export type ChartStories = {
   playlist_id: string
   playlist_name: string
   revealed: boolean
-  total: number
-  limit: number
-  offset: number
-  query: string
-  tracks: BalancedEntry[]
+  most_duelled: {
+    track: MatchupTrack
+    comparisons: number
+  } | null
+  top_voter: {
+    username: string
+    picks: number
+  } | null
 }
 
 export type DailyVotes = {
@@ -227,5 +216,91 @@ export type AdminUsersPage = {
   limit: number
   offset: number
   query: string
+  sort: string
   users: AdminUserRow[]
+}
+
+export type AdminHourlyPicks = {
+  hour: number
+  picks: number
+}
+
+export type AdminPickBucket = {
+  label: string
+  voters: number
+}
+
+export type AdminTopTrack = {
+  id: string
+  title: string
+  artists: string
+  album_image_url: string | null
+  rating: number
+  comparisons: number
+  wins: number
+}
+
+export type AdminTopVoter = {
+  user_id: string
+  username: string
+  picks: number
+  duels: number
+  last_active_at: string
+}
+
+export type AdminRecentPick = {
+  created_at: string
+  username: string
+  winner_title: string
+  winner_artists: string
+  winner_image_url: string | null
+  other_title: string
+  other_artists: string
+}
+
+export type AdminDailyVotes = {
+  date: string
+  votes: number
+  voters: number
+}
+
+export type AdminInsights = {
+  playlist_id: string | null
+  playlist_name: string | null
+  playlist_image_url: string | null
+  revealed: boolean
+  range_days: number
+  range_start: string
+  range_end: string
+  range_picks: number
+  range_voters: number
+  range_duels: number
+  range_picks_per_voter: number
+  range_duels_per_voter: number
+  total_tracks: number
+  tracks_compared: number
+  tracks_uncompared: number
+  previews_missing: number
+  total_picks: number
+  picks_today: number
+  picks_7d: number
+  picks_per_voter: number
+  total_voters: number
+  active_voters_24h: number
+  active_voters_7d: number
+  total_users: number
+  admins: number
+  invites_total: number
+  invites_used: number
+  invites_open: number
+  invites_expired: number
+  total_duels: number
+  duels_per_voter: number
+  coverage_pct: number
+  daily: AdminDailyVotes[]
+  hourly: AdminHourlyPicks[]
+  pick_distribution: AdminPickBucket[]
+  top_tracks: AdminTopTrack[]
+  top_voters: AdminTopVoter[]
+  recent_picks: AdminRecentPick[]
 }

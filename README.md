@@ -1,13 +1,12 @@
 # Playlist Voter
 
 A collaborative song ranking game. Voters pick between two songs in duels; every
-pick updates a shared score. Voters always see Your Ranking, while The Standings
-stay hidden until the admin opens The Reveal. The Standings offer the official
-list and a volume-adjusted Balanced list.
+pick updates the official shared score. Voters always see Your Ranking, while The
+Standings stay hidden until the admin opens The Reveal.
 
 **Current status: feature-complete.** Playlist Voter has invite-only accounts,
-Spotify import with previews, duels, undo, Your Ranking, official and balanced
-standings, The Reveal, CSV export, an admin dashboard, rate limiting, backups and
+Spotify import with previews, duels, undo, Your Ranking, the official standings,
+The Reveal, CSV export, a rich mission-control admin, rate limiting, backups and
 security headers.
 
 ## Stack
@@ -77,19 +76,20 @@ docker compose logs -f backend
 | `POST` | `/api/vote` | session | Record a pick on a served duel |
 | `POST` | `/api/vote/undo` | session | Reverse the current user's last pick |
 | `GET` | `/api/me/ranking` | session | Your Ranking (`limit`, `offset`) |
-| `GET` | `/api/chart/status` | public | Whether The Standings are revealed, plus counts |
-| `GET` | `/api/chart` | public | Revealed standings (`limit`, `offset`, `q`) |
-| `GET` | `/api/chart/balanced` | public | Revealed balanced standings (`limit`, `offset`, `q`) |
+| `GET` | `/api/chart/status` | public | Whether The Standings are revealed, plus playlist cover and counts |
+| `GET` | `/api/chart` | public | Revealed official standings (`limit`, `offset`, `q`) |
+| `GET` | `/api/chart/stories` | public | Most-duelled song and top voter, after The Reveal |
 | `POST` | `/api/admin/reveal` | admin | Open or seal The Reveal |
-| `GET` | `/api/admin/chart.csv` | admin | Download official + balanced standings as CSV |
+| `GET` | `/api/admin/chart.csv` | admin | Download the official standings as CSV |
 | `GET` | `/api/admin/stats` | admin | Dashboard counters + 14-day activity |
-| `GET` | `/api/admin/users` | admin | Voters with picks, duels and last activity (`limit`, `offset`, `q`) |
+| `GET` | `/api/admin/insights` | admin | Mission-control totals, charts, top tracks, top voters and recent picks (`days`, 1–90) |
+| `GET` | `/api/admin/users` | admin | Voters with picks, duels and last activity (`limit`, `offset`, `q`, `sort`) |
+| `GET` | `/api/admin/users.csv` | admin | Download every voter and their activity as CSV |
 | `GET` | `/api/admin/ranking` | admin | Full standings with score internals, even while sealed |
-| `GET` | `/api/admin/balanced` | admin | Full balanced standings, even while sealed |
-| `GET` | `/api/admin/balanced/settings` | admin | Balanced ranking tuning constants |
-| `PUT` | `/api/admin/balanced/settings` | admin | Update balanced ranking tuning constants |
+| `GET` | `/api/admin/stories` | admin | Stories, available even while sealed |
 | `POST` | `/api/admin/reset/votes` | admin | Reset all picks/duels/scores; requires `{"confirm":"RESET"}` |
 | `POST` | `/api/admin/playlist/remove` | admin | Remove the active playlist and all its data; requires `{"confirm":"REMOVE"}` |
+| `DELETE` | `/api/admin/invites/{id}` | admin | Revoke an unused invite |
 
 API paths keep their internal names (`matchup`, `vote`, `chart`); the product calls
 these duels, picks and standings.
@@ -219,62 +219,47 @@ snapshots, other voters' picks on the same tracks remain intact.
 ## The Reveal & The Standings
 
 - `/standings` is the **public standings page**; it needs no login. Until the
-  admin opens The Reveal, the page shows a sealed state with the playlist name and
-  pick count, but no standings data.
+  admin opens The Reveal, the page shows a sealed cassette case with the playlist
+  cover, name and pick count, but no standings data.
 - The admin **The Reveal** panel opens or seals the standings. Picking continues
-  after The Reveal, and the standings can be sealed again.
-- The standings are ordered by score, then wins, then title. It supports
-  server-side search (`q`) across titles, artists and albums, plus pagination.
-- **Download CSV** in the admin panel exports the official row plus
-  `balanced_rank,balanced_score,balanced_voters,balanced_weight,balanced_confidence`
-  for every track, correctly quoting commas, quotes and newlines.
+  after The Reveal, and the standings can be sealed again. The first time a voter
+  sees the revealed page, a one-time **seal broken** moment appears.
+- The revealed page has a **top-three podium**, a hand-numbered official
+  tracklist, search across titles, artists and albums, album art, wins, duels and
+  score, plus infinite scroll with a visible **Load more** fallback.
+- After The Reveal, the **Liner notes** strip shows the most-duelled song and the
+  top voter. `GET /api/chart/stories` exposes the same data.
+- The standings are ordered by score, then wins, then title. The public page and
+  the admin CSV use the same official order.
+- **Download CSV** in the admin panel exports the official standings as
+  `rank,title,artists,album,spotify_id,rating,comparisons,wins`, correctly
+  quoting commas, quotes and newlines.
 - `/your-ranking` is Your Ranking. `/standings` is the shared list.
 
-## Balanced ranking
+## Mission control
 
-The official list counts every pick equally, so a voter with 1,000 picks has 50×
-the influence of a voter with 20. The **Balanced** tab on `/standings` adds a
-volume-adjusted list built from the same picks:
+`/admin` is the mission-control dashboard, available to admin accounts. It uses
+the same cream, cobalt and safety-orange visual language as the public site.
 
-- Each voter's picks are replayed into a private personal Elo score.
-- A voter's influence is `picks^0.5` (square root): 20 picks count meaningfully,
-  100 count about twice as much, and 1,000 count about 7× a 20-pick voter instead
-  of 50×.
-- Each personal rating is shrunk toward neutral by
-  `comparisons / (comparisons + confidence_prior)`, so a song one voter compared
-  once barely moves the balanced list.
-- Songs with little aggregate evidence are pulled toward 1000 by
-  `neutral_prior`.
-- Songs nobody has compared are kept at the bottom, marked **No data**; they are
-  never hidden and never placed in the middle.
-
-The tab defaults to **Official**, and the official list is unchanged.
-
-The three constants and an optional minimum pick count live in the singleton
-`balanced_settings` table and are editable under **Admin → Balanced**. Defaults
-are exponent `0.5`, confidence prior `10`, neutral prior `20`, minimum picks `0`.
-
-`GET /api/chart/balanced` is gated by The Reveal exactly like the official list.
-`GET /api/admin/balanced` works while sealed. The combined CSV leaves the
-balanced rank and score blank for songs nobody has compared.
-
-## Admin dashboard
-
-`/admin` is the control room, available to admin accounts:
-
-- **Overview** — total picks, picks today, duels seen, active voters, registered
-  accounts, songs compared and a 14-day picks-per-day graph.
-- **Runtime** — backend version, environment, uptime and Postgres readiness,
-  visible only to the admin.
-- **Voters** — every account with picks, duels seen, join date and last activity;
-  server-side username search and pagination.
-- **Standings** — official and balanced tables with tabs; all tracks with score,
-  duels, wins and (for balanced) voter and weight counts, even while The Standings
-  are still sealed; search and pagination.
-- **Balanced** — edit the influence exponent, confidence prior, neutral prior and
-  minimum picks per voter. Changes apply to the next standings request.
-- **Operations** — playlist import, Spotify connection, The Reveal control, CSV
-  export and invite management.
+- **Overview** — a live read on the active playlist: total picks, picks today and
+  over 7 days, active voters over 24 hours and 7 days, picks per voter, duels per
+  voter, song coverage, uncompared tracks, preview gaps, the invite pipeline, a
+  daily picks chart, an hourly picks chart, voter distribution, top tracks, top
+  voters, recent picks and the Liner notes stories. Use the **Today / 7d / 14d /
+  30d / 90d** range buttons to look back, then click any bar in the daily chart to
+  see that day's picks and voters.
+- **Voters** — every account with picks, duels seen, join date and last activity.
+  Sort by last active, most picks, most duels, newest or username; search by
+  username, paginate, and export the full list as CSV.
+- **Standings** — the complete official standings with score, duels and wins even
+  while The Standings are sealed; search, pagination and CSV export.
+- **Playlist** — import or re-sync the Spotify playlist, connect or disconnect
+  Spotify, inspect tracks and preview coverage, and fetch missing previews.
+- **The Reveal** — open or seal the public standings, see the live/sealed state,
+  and download the official CSV.
+- **Invites** — generate invite codes, copy them, see open/used/expired status,
+  and revoke unused codes.
+- **Runtime** — backend version, environment, uptime and PostgreSQL readiness.
 - **Danger zone** — reset all picks, duels and scores for the active playlist
   (and seal The Standings), or remove the playlist entirely to return to the
   empty state. Both require typed confirmation; voters, invites and the Spotify
@@ -337,6 +322,9 @@ Frontend:
 cd frontend
 npm install
 npm run dev        # http://localhost:5173, proxies /api, /healthz, /readyz to :8080
+
+# If the backend runs through Docker Compose on host port 8765:
+VITE_API_PROXY=http://127.0.0.1:8765 npm run dev
 ```
 
 ## Configuration
@@ -378,7 +366,7 @@ npm run dev        # http://localhost:5173, proxies /api, /healthz, /readyz to :
 │       ├── spotify_auth.rs # Stored Spotify tokens, refresh, status
 │       ├── db.rs         # shared database lookups
 │       ├── elo.rs        # Elo maths with decaying K
-│       ├── api/          # auth, invites, playlist import, matchups, votes, chart, balanced
+│       ├── api/          # auth, invites, playlist import, matchups, votes, chart, stories, dashboard
 │       ├── routes.rs     # health, readiness, API 404
 │       └── state.rs      # shared app state
 ├── scripts/
@@ -388,9 +376,9 @@ npm run dev        # http://localhost:5173, proxies /api, /healthz, /readyz to :
 │   └── nginx/            # certbot-ready HTTP vhost
 └── frontend/
     └── src/
-        ├── components/   # header, auth, playlist, invites, standings, balanced
+        ├── components/   # header, auth, playlist, invites, standings, mission control
         ├── context/      # auth provider
-        ├── pages/        # home, duel, Your Ranking, The Standings, admin
+        ├── pages/        # home, duel, Your Ranking, The Standings, mission control, style tile
         └── lib/          # API client and types
 ```
 
@@ -404,4 +392,4 @@ npm run dev        # http://localhost:5173, proxies /api, /healthz, /readyz to :
 6. ✅ The Reveal, public standings, CSV export
 7. ✅ Full admin dashboard
 8. ✅ Hardening & polish
-9. ✅ Balanced ranking (square-root influence, confidence-weighted personal Elo)
+9. ✅ Official standings redesign and mission-control dashboard

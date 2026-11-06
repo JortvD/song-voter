@@ -1,8 +1,8 @@
 import type {
+  AdminInsights,
   AdminUsersPage,
-  BalancedChart,
-  BalancedSettings,
   ChartStatus,
+  ChartStories,
   DashboardStats,
   ImportSummary,
   Invite,
@@ -116,39 +116,27 @@ export const api = {
     request<PublicChart>(
       `/api/chart?limit=${limit}&offset=${offset}&q=${encodeURIComponent(query)}`,
     ),
-  getBalancedChart: (offset = 0, limit = 50, query = '') =>
-    request<BalancedChart>(
-      `/api/chart/balanced?limit=${limit}&offset=${offset}&q=${encodeURIComponent(query)}`,
-    ),
+  getChartStories: () => request<ChartStories>('/api/chart/stories'),
   setReveal: (revealed: boolean) =>
     request<ChartStatus>('/api/admin/reveal', {
       method: 'POST',
       body: { revealed },
     }),
   getDashboardStats: () => request<DashboardStats>('/api/admin/stats'),
-  getAdminUsers: (offset = 0, limit = 50, query = '') =>
+  getAdminUsers: (offset = 0, limit = 50, query = '', sort = 'last_active') =>
     request<AdminUsersPage>(
-      `/api/admin/users?limit=${limit}&offset=${offset}&q=${encodeURIComponent(query)}`,
+      `/api/admin/users?limit=${limit}&offset=${offset}&q=${encodeURIComponent(query)}&sort=${encodeURIComponent(sort)}`,
     ),
+  getAdminInsights: (days = 14) =>
+    request<AdminInsights>(`/api/admin/insights?days=${days}`),
+  getAdminStories: () => request<ChartStories>('/api/admin/stories'),
   getAdminRanking: (offset = 0, limit = 50, query = '') =>
     request<PublicChart>(
       `/api/admin/ranking?limit=${limit}&offset=${offset}&q=${encodeURIComponent(query)}`,
     ),
-  getAdminBalanced: (offset = 0, limit = 50, query = '') =>
-    request<BalancedChart>(
-      `/api/admin/balanced?limit=${limit}&offset=${offset}&q=${encodeURIComponent(query)}`,
-    ),
-  getBalancedSettings: () =>
-    request<BalancedSettings>('/api/admin/balanced/settings'),
-  updateBalancedSettings: (input: {
-    influence_exponent: number
-    confidence_prior: number
-    neutral_prior: number
-    min_picks: number
-  }) =>
-    request<BalancedSettings>('/api/admin/balanced/settings', {
-      method: 'PUT',
-      body: input,
+  revokeInvite: (id: string) =>
+    request<{ revoked: boolean; id: string }>(`/api/admin/invites/${id}`, {
+      method: 'DELETE',
     }),
   resetVotes: (confirm: string) =>
     request<{ reset: boolean; deleted_votes: number; deleted_matchups: number }>(

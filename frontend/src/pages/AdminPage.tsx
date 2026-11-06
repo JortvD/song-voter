@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { AdminDangerZone } from '../components/AdminDangerZone'
-import { AdminBalancedSettings } from '../components/AdminBalancedSettings'
 import { AdminInvites } from '../components/AdminInvites'
 import { AdminPlaylist } from '../components/AdminPlaylist'
 import { AdminRankingTable } from '../components/AdminRankingTable'
@@ -10,61 +9,18 @@ import { AdminReveal } from '../components/AdminReveal'
 import { AdminUsers } from '../components/AdminUsers'
 import { RequireAdmin } from '../components/RequireAdmin'
 import { StatusCard } from '../components/StatusCard'
+import { AdminNav } from '../components/admin/AdminNav'
+import type { AdminSection } from '../components/admin/AdminNav'
+import { AdminOverview } from '../components/admin/AdminOverview'
+import { AdminSectionHeader } from '../components/admin/AdminSectionHeader'
+import { AdminStatusStrip } from '../components/admin/AdminStatusStrip'
 import { ApiError, api } from '../lib/api'
-import type { DashboardStats } from '../lib/types'
+import type { AdminInsights } from '../lib/types'
 
-function formatNumber(value: number) {
-  return value.toLocaleString()
-}
-
-function SectionHeading({
-  number,
-  title,
-  aside,
-}: {
-  number: string
-  title: string
-  aside?: string
-}) {
-  return (
-    <div className="mb-3 flex items-end justify-between gap-3 border-b border-line pb-2">
-      <div className="flex items-baseline gap-3">
-        <span className="font-serif text-2xl leading-none text-accent">{number}</span>
-        <h2 className="font-serif text-2xl leading-none">{title}</h2>
-      </div>
-      {aside && (
-        <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
-          {aside}
-        </span>
-      )}
-    </div>
-  )
-}
-
-function StatCard({
-  label,
-  value,
-  hint,
-}: {
-  label: string
-  value: string
-  hint?: string
-}) {
-  return (
-    <div className="panel p-4">
-      <p className="label">{label}</p>
-      <p className="mt-2 font-serif text-3xl leading-none">{value}</p>
-      {hint && (
-        <p className="mt-2 font-mono text-[8px] uppercase tracking-[0.12em] text-muted">
-          {hint}
-        </p>
-      )}
-    </div>
-  )
-}
-
-function Dashboard() {
-  const [stats, setStats] = useState<DashboardStats | null>(null)
+function MissionControl() {
+  const [section, setSection] = useState<AdminSection>('overview')
+  const [insights, setInsights] = useState<AdminInsights | null>(null)
+  const [days, setDays] = useState(14)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -74,189 +30,177 @@ function Dashboard() {
     setError(null)
 
     try {
-      setStats(await api.getDashboardStats())
+      setInsights(await api.getAdminInsights(days))
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'Could not load dashboard stats')
+      setError(
+        caught instanceof ApiError
+          ? caught.message
+          : 'Could not load mission control data',
+      )
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [days])
 
   useEffect(() => {
     void load()
-  }, [load, refreshKey])
+  }, [load])
 
-  const refresh = () => setRefreshKey((value) => value + 1)
-
-  const daily = stats?.daily ?? []
-  const maxDaily = Math.max(1, ...daily.map((day) => day.votes))
+  function refresh() {
+    setRefreshKey((value) => value + 1)
+    void load()
+  }
 
   return (
-    <>
-      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line pb-4">
-        <div>
-          <p className="label">Admin</p>
-          <h1 className="mt-2 font-serif text-4xl leading-none sm:text-5xl">
-            The control room.
-          </h1>
-          <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
-            {stats?.playlist_name ?? 'No active playlist'} ·{' '}
-            {stats?.revealed ? 'Standings live' : 'Standings sealed'}
-          </p>
-        </div>
+    <div className="space-y-5">
+      <AdminStatusStrip
+        insights={insights}
+        loading={loading}
+        error={error}
+        onRefresh={refresh}
+      />
 
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={refresh} disabled={loading} className="btn-ghost">
-            {loading ? 'Refreshing…' : 'Refresh'}
-          </button>
-          {stats?.revealed && (
-            <Link to="/standings" className="btn-ghost">
-              Public standings
-            </Link>
+      <div className="grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
+        <AdminNav section={section} onChange={setSection} insights={insights} />
+
+        <div className="min-w-0">
+          {section === 'overview' && (
+            <AdminOverview
+              key={`overview-${refreshKey}`}
+              insights={insights}
+              loading={loading}
+              error={error}
+              days={days}
+              onDaysChange={setDays}
+              onRefresh={refresh}
+              onNavigate={setSection}
+            />
           )}
-          <Link to="/" className="btn-ghost">
-            Home
-          </Link>
-        </div>
-      </div>
 
-      {error && (
-        <p className="mt-4 border-l-2 border-accent bg-accent/5 px-3 py-2 text-sm text-accent">
-          {error}
-        </p>
-      )}
-
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <StatCard
-          label="Picks"
-          value={stats ? formatNumber(stats.total_votes) : '—'}
-          hint={stats ? `${formatNumber(stats.votes_today)} today` : undefined}
-        />
-        <StatCard
-          label="Duels"
-          value={stats ? formatNumber(stats.total_matchups) : '—'}
-          hint="pairs compared"
-        />
-        <StatCard
-          label="Active voters"
-          value={stats ? formatNumber(stats.active_users) : '—'}
-          hint={stats ? `${formatNumber(stats.active_today)} today` : undefined}
-        />
-        <StatCard
-          label="Registered"
-          value={stats ? formatNumber(stats.total_users) : '—'}
-          hint="accounts"
-        />
-        <StatCard
-          label="Songs compared"
-          value={
-            stats
-              ? `${formatNumber(stats.tracks_compared)} / ${formatNumber(stats.total_tracks)}`
-              : '—'
-          }
-          hint="coverage"
-        />
-      </div>
-
-      <div className="mt-8">
-        <SectionHeading number="01" title="Activity" aside="Last 14 days" />
-        <section className="panel p-5">
-          <div className="flex items-baseline justify-between gap-3">
-            <p className="label">Picks per day</p>
-            <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
-              {stats ? `${formatNumber(stats.total_votes)} total` : '—'}
-            </p>
-          </div>
-
-          {daily.length > 0 ? (
-            <>
-              <div className="mt-5 flex h-36 items-end gap-1">
-                {daily.map((day) => (
-                  <div
-                    key={day.date}
-                    title={`${day.date}: ${day.votes}`}
-                    className="group flex h-full flex-1 flex-col justify-end"
-                  >
-                    <div
-                      className="w-full bg-ink/80 transition-colors group-hover:bg-accent"
-                      style={{
-                        height: `${
-                          day.votes === 0
-                            ? 0
-                            : Math.max(2, (day.votes / maxDaily) * 100)
-                        }%`,
-                      }}
-                    />
-                  </div>
-                ))}
-              </div>
-              <div className="mt-2 flex gap-1 font-mono text-[7px] uppercase tracking-[0.1em] text-muted">
-                {daily.map((day, index) => (
-                  <span key={day.date} className="flex-1 text-center">
-                    {index % 2 === 0 ? day.date.slice(5) : ''}
-                  </span>
-                ))}
-              </div>
-            </>
-          ) : (
-            <p className="mt-5 text-sm text-muted">No activity yet.</p>
+          {section === 'voters' && (
+            <div className="space-y-4">
+              <AdminSectionHeader
+                eyebrow="The room"
+                title="Voters"
+                description="Every account, with picks, duels and last activity. Sort the list, search by username, or export the whole room."
+              >
+                <a href="/api/admin/users.csv" className="pv-admin-button">
+                  Export voters CSV
+                </a>
+                <button type="button" onClick={refresh} className="pv-admin-button">
+                  Refresh
+                </button>
+              </AdminSectionHeader>
+              <AdminUsers key={`voters-${refreshKey}`} />
+            </div>
           )}
-        </section>
-      </div>
 
-      <div className="mt-8">
-        <SectionHeading number="02" title="Runtime" aside="Live health" />
-        <StatusCard />
-      </div>
+          {section === 'standings' && (
+            <div className="space-y-4">
+              <AdminSectionHeader
+                eyebrow="The official list"
+                title="Standings"
+                description="Every track with score, duels and wins, even while The Standings are sealed. Search, page through, or export the official CSV."
+              >
+                <a href="/api/admin/chart.csv" className="pv-admin-button">
+                  Export standings CSV
+                </a>
+                <Link to="/standings" className="pv-admin-button">
+                  Public standings
+                </Link>
+              </AdminSectionHeader>
+              <AdminRankingTable key={`standings-${refreshKey}`} />
+            </div>
+          )}
 
-      <div className="mt-8">
-        <SectionHeading
-          number="03"
-          title="Voters"
-          aside={stats ? `${formatNumber(stats.total_users)} accounts` : undefined}
-        />
-        <AdminUsers key={`users-${refreshKey}`} />
-      </div>
+          {section === 'playlist' && (
+            <div className="space-y-4">
+              <AdminSectionHeader
+                eyebrow="The tape"
+                title="Playlist"
+                description="Import or re-sync the Spotify playlist, watch preview coverage and keep the current session healthy."
+              >
+                <button type="button" onClick={refresh} className="pv-admin-button">
+                  Refresh
+                </button>
+              </AdminSectionHeader>
+              <AdminPlaylist key={`playlist-${refreshKey}`} />
+            </div>
+          )}
 
-      <div className="mt-8">
-        <SectionHeading
-          number="04"
-          title="Standings"
-          aside={stats ? `${formatNumber(stats.total_tracks)} songs` : undefined}
-        />
-        <AdminRankingTable key={`ranking-${refreshKey}`} />
-      </div>
+          {section === 'reveal' && (
+            <div className="space-y-4">
+              <AdminSectionHeader
+                eyebrow="The switch"
+                title="The Reveal"
+                description="Open or seal the shared standings. Picking stays open either way, and you can hide the list again at any time."
+              >
+                <Link to="/standings" className="pv-admin-button">
+                  Public standings
+                </Link>
+              </AdminSectionHeader>
+              <AdminReveal key={`reveal-${refreshKey}`} />
+            </div>
+          )}
 
-      <div className="mt-8">
-        <SectionHeading number="05" title="Balanced" aside="Ranking settings" />
-        <AdminBalancedSettings key={`balanced-${refreshKey}`} />
-      </div>
+          {section === 'invites' && (
+            <div className="space-y-4">
+              <AdminSectionHeader
+                eyebrow="The door"
+                title="Invites"
+                description="Generate invite codes, copy them for voters, and revoke any code that has not been used yet."
+              >
+                <button type="button" onClick={refresh} className="pv-admin-button">
+                  Refresh
+                </button>
+              </AdminSectionHeader>
+              <AdminInvites key={`invites-${refreshKey}`} />
+            </div>
+          )}
 
-      <div className="mt-8">
-        <SectionHeading number="06" title="Operations" />
-        <div className="grid items-start gap-6 lg:grid-cols-[1.3fr_0.7fr]">
-          <div className="space-y-6">
-            <AdminPlaylist key={`playlist-${refreshKey}`} />
-            <AdminReveal key={`reveal-${refreshKey}`} />
-          </div>
-          <AdminInvites key={`invites-${refreshKey}`} />
+          {section === 'runtime' && (
+            <div className="space-y-4">
+              <AdminSectionHeader
+                eyebrow="The engine room"
+                title="Runtime"
+                description="Backend version, environment, uptime and PostgreSQL readiness. This card refreshes itself every ten seconds."
+              >
+                <button type="button" onClick={refresh} className="pv-admin-button">
+                  Refresh dashboard
+                </button>
+              </AdminSectionHeader>
+              <StatusCard />
+            </div>
+          )}
+
+          {section === 'danger' && (
+            <div className="space-y-4">
+              <AdminSectionHeader
+                eyebrow="Careful"
+                title="Danger zone"
+                description="Destructive actions for the active playlist. Both require a typed confirmation, and both keep voters, invites and the Spotify connection."
+              />
+              <AdminDangerZone
+                key={`danger-${refreshKey}`}
+                onReset={refresh}
+                onRemove={refresh}
+              />
+            </div>
+          )}
         </div>
       </div>
-
-      <div className="mt-8">
-        <SectionHeading number="07" title="Danger zone" />
-        <AdminDangerZone onReset={refresh} onRemove={refresh} />
-      </div>
-    </>
+    </div>
   )
 }
 
 export function AdminPage() {
   return (
-    <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-8 sm:px-8 sm:py-10">
-      <RequireAdmin>
-        <Dashboard />
-      </RequireAdmin>
+    <main className="flex-1 bg-paper text-ink">
+      <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        <RequireAdmin>
+          <MissionControl />
+        </RequireAdmin>
+      </div>
     </main>
   )
 }
