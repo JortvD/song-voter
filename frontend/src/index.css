@@ -692,6 +692,7 @@ body::before {
 @layer components {
   .pv-duel-page {
     min-height: calc(100dvh - 4rem);
+    min-height: calc(100svh - 4rem);
     padding-bottom: calc(4rem + env(safe-area-inset-bottom));
   }
 
@@ -821,6 +822,7 @@ body::before {
     grid-template-columns: auto minmax(0, 1fr) auto;
     grid-template-areas: 'cover label listen';
     min-height: clamp(112px, 17dvh, 160px);
+    min-height: clamp(112px, 17svh, 160px);
   }
 
   .pv-duel-side.is-playing {
@@ -843,6 +845,7 @@ body::before {
     grid-area: cover;
     align-self: center;
     width: clamp(84px, 15dvh, 132px);
+    width: clamp(84px, 15svh, 132px);
     background: var(--color-paper);
     box-shadow: 2px 2px 0 0 var(--color-ink);
     color: var(--color-ink);
@@ -1126,6 +1129,7 @@ body::before {
     grid-area: cover;
     align-self: center;
     width: clamp(84px, 15dvh, 132px);
+    width: clamp(84px, 15svh, 132px);
   }
 
   .pv-duel-skel-copy {
@@ -1741,6 +1745,7 @@ body::before {
 
   .pv-duel-cover {
     width: clamp(72px, 12dvh, 104px);
+    width: clamp(72px, 12svh, 104px);
   }
 
   .pv-duel-listen {

@@ -91,7 +91,7 @@ function PlaylistErrorBanner() {
 
 function App() {
   return (
-    <div className="flex min-h-dvh flex-col">
+    <div className="flex min-h-screen min-h-svh flex-col">
       <DocumentTitle />
       <a
         href="#main"
