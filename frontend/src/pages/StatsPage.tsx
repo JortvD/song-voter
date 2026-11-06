@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { Countdown } from '../components/Countdown'
+import { SeasonUnavailable } from '../components/SeasonUnavailable'
 import { StoryCardGrid, StoryLeaderboards } from '../components/StoryCards'
 import { useAuth } from '../context/AuthContext'
 import { usePlaylist } from '../context/PlaylistContext'
@@ -112,7 +113,7 @@ function FacetChips({
           className={chip(value === option.value)}
         >
           {option.label}{' '}
-          <span className="opacity-60">{formatNumber(option.count)}</span>
+          <span>{formatNumber(option.count)}</span>
         </button>
       ))}
     </div>
@@ -125,12 +126,16 @@ function AggregateList({
   entries,
   total,
   empty,
+  error,
+  onRetry,
 }: {
   loading: boolean
   title: string
   entries: AggregateEntry[]
   total: number
   empty: string
+  error?: string | null
+  onRetry?: () => void
 }) {
   return (
     <article className="pv-card min-w-0 p-4">
@@ -146,7 +151,16 @@ function AggregateList({
         </span>
       </div>
 
-      {loading ? (
+      {error ? (
+        <div role="alert" className="py-6 text-center">
+          <p className="text-sm text-danger">{error}</p>
+          {onRetry && (
+            <button type="button" onClick={onRetry} className="btn-ghost mt-3">
+              Try again
+            </button>
+          )}
+        </div>
+      ) : loading ? (
         <div className="mt-3 space-y-2">
           {[0, 1, 2, 3, 4].map((index) => (
             <div key={index} className="h-12 animate-pulse rounded-lg border border-line" />
@@ -356,7 +370,12 @@ function NoPlaylistStats({ user }: { user: User | null }) {
 
 export function StatsPage() {
   const { user } = useAuth()
-  const { status, loading: playlistLoading, refresh: refreshPlaylist } = usePlaylist()
+  const {
+    status,
+    loading: playlistLoading,
+    error: playlistError,
+    refresh: refreshPlaylist,
+  } = usePlaylist()
   const [stories, setStories] = useState<ChartStories | null>(null)
   const [artists, setArtists] = useState<AggregateEntry[]>([])
   const [albums, setAlbums] = useState<AggregateEntry[]>([])
@@ -368,6 +387,7 @@ export function StatsPage() {
   const [statsLoading, setStatsLoading] = useState(true)
   const [storiesLoading, setStoriesLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [statsError, setStatsError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
@@ -414,7 +434,7 @@ export function StatsPage() {
     let active = true
     const controller = new AbortController()
     setStatsLoading(true)
-    setError(null)
+    setStatsError(null)
 
     const filters = {
       limit: LEADERBOARD_SIZE,
@@ -440,7 +460,7 @@ export function StatsPage() {
           setError('The standings were sealed again. Refreshing…')
           void refreshPlaylist()
         } else {
-          setError(
+          setStatsError(
             caught instanceof ApiError
               ? caught.message
               : 'Could not load the stats',
@@ -488,6 +508,18 @@ export function StatsPage() {
             />
           ))}
         </div>
+      </main>
+    )
+  }
+
+  if (!status && playlistError) {
+    return (
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 sm:py-10 lg:px-8">
+        <SeasonUnavailable
+          error={playlistError}
+          onRetry={refreshPlaylist}
+          title="The stats are unavailable."
+        />
       </main>
     )
   }
@@ -637,7 +669,8 @@ export function StatsPage() {
         </section>
       )}
 
-      <section id="explore" className="mt-9 scroll-mt-24">
+      {!storiesLoading && (
+        <section id="explore" className="mt-9 scroll-mt-24">
         <div className="flex flex-wrap items-end justify-between gap-3 border-b-2 border-ink/15 pb-2">
           <div>
             <p className="pv-label">The deep cuts</p>
@@ -722,6 +755,8 @@ export function StatsPage() {
             entries={artists}
             total={artistTotal}
             empty="No artists match these filters."
+            error={statsError}
+            onRetry={refresh}
           />
           <AggregateList
             loading={statsLoading}
@@ -729,6 +764,8 @@ export function StatsPage() {
             entries={albums}
             total={albumTotal}
             empty="No albums match these filters."
+            error={statsError}
+            onRetry={refresh}
           />
         </div>
 
@@ -752,7 +789,8 @@ export function StatsPage() {
             />
           )}
         </div>
-      </section>
+        </section>
+      )}
     </main>
   )
 }

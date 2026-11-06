@@ -45,6 +45,9 @@ export function AdminPlaylist() {
   const [tracks, setTracks] = useState<Track[]>([])
   const [metadata, setMetadata] = useState<MetadataStatus | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [tracksTotal, setTracksTotal] = useState(0)
+  const [tracksLoading, setTracksLoading] = useState(false)
   const [input, setInput] = useState('')
   const [startInput, setStartInput] = useState('')
   const [importing, setImporting] = useState(false)
@@ -54,6 +57,7 @@ export function AdminPlaylist() {
   const [backfilling, setBackfilling] = useState(false)
   const [metadataStarting, setMetadataStarting] = useState(false)
   const [previewNotice, setPreviewNotice] = useState<string | null>(null)
+  const [previewPending, setPreviewPending] = useState(false)
   const [metadataNotice, setMetadataNotice] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
@@ -80,13 +84,16 @@ export function AdminPlaylist() {
       setInput(data.playlist.spotify_id)
       setStartInput(localInputValue(data.playlist.scheduled_start_at))
       if (data.playlist.started_at) {
-        const page = await api.getTracks(6)
+        const page = await api.getTracks(50)
         setTracks(page.tracks)
+        setTracksTotal(page.total)
       } else {
         setTracks([])
+        setTracksTotal(0)
       }
     } else {
       setTracks([])
+      setTracksTotal(0)
       setInput('')
       setStartInput('')
     }
@@ -94,11 +101,15 @@ export function AdminPlaylist() {
 
   useEffect(() => {
     let active = true
+    setLoading(true)
+    setLoadError(null)
 
     load()
       .catch((caught: unknown) => {
         if (active) {
-          setError(caught instanceof ApiError ? caught.message : 'Could not load the playlist')
+          setLoadError(
+            caught instanceof ApiError ? caught.message : 'Could not load the playlist',
+          )
         }
       })
       .finally(() => {
@@ -109,6 +120,18 @@ export function AdminPlaylist() {
       active = false
     }
   }, [load])
+
+  function retryLoad() {
+    setLoading(true)
+    setLoadError(null)
+    load()
+      .catch((caught: unknown) => {
+        setLoadError(
+          caught instanceof ApiError ? caught.message : 'Could not load the playlist',
+        )
+      })
+      .finally(() => setLoading(false))
+  }
 
   useEffect(() => {
     const playlist = overview?.playlist
@@ -301,20 +324,66 @@ export function AdminPlaylist() {
 
   async function fetchPreviews() {
     setBackfilling(true)
+    setPreviewPending(false)
     setError(null)
     setPreviewNotice(null)
 
     try {
       const response = await api.backfillPreviews()
+      if (response.missing === 0) {
+        setPreviewNotice('All tracks already have previews.')
+        return
+      }
+
+      const initial = response.missing
       setPreviewNotice(
-        response.missing > 0
-          ? `Fetching ${formatNumber(response.missing)} missing previews in the background.`
-          : 'All tracks already have previews.',
+        `Fetching ${formatNumber(initial)} missing previews in the background…`,
+      )
+      setPreviewPending(true)
+
+      // Preview backfill is a background task with no run id. Poll the
+      // playlist overview until the gap count changes, then report the result
+      // instead of leaving an optimistic "Fetching…" notice forever.
+      let latest = initial
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1800))
+        const next = await api.getPlaylist()
+        setOverview(next)
+        latest = next.previews_missing
+        if (latest === 0) {
+          setPreviewNotice('Preview fetch complete — every track has a preview.')
+          return
+        }
+        if (latest < initial) {
+          setPreviewNotice(
+            `Preview fetch finished — ${formatNumber(latest)} still missing.`,
+          )
+          return
+        }
+      }
+
+      setPreviewNotice(
+        `Preview fetch is still running in the background — ${formatNumber(latest)} still missing. Refresh to check again.`,
       )
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'Could not start the preview fetch')
     } finally {
       setBackfilling(false)
+      setPreviewPending(false)
+    }
+  }
+
+  async function loadMoreTracks() {
+    if (tracksLoading || tracks.length >= tracksTotal) return
+    setTracksLoading(true)
+    try {
+      const page = await api.getTracks(50, tracks.length)
+      setTracks((current) => [...current, ...page.tracks])
+      setTracksTotal(page.total)
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Could not load more tracks')
+    } finally {
+      setTracksLoading(false)
     }
   }
 
@@ -445,6 +514,13 @@ export function AdminPlaylist() {
               <div className="h-16 animate-pulse border border-line bg-paper" />
               <div className="h-8 animate-pulse border border-line bg-paper" />
             </div>
+          ) : loadError ? (
+            <div role="alert" className="border border-danger/40 bg-danger/5 px-4 py-6 text-center">
+              <p className="text-xs text-danger">{loadError}</p>
+              <button type="button" onClick={retryLoad} className="btn-ghost mt-3">
+                Try again
+              </button>
+            </div>
           ) : playlist ? (
             <>
               <div className="flex gap-4">
@@ -465,6 +541,10 @@ export function AdminPlaylist() {
                     {playlist.started_at === null
                       ? 'Not loaded yet'
                       : `${formatNumber(overview?.track_count ?? 0)} tracks`}
+                    {playlist.started_at !== null &&
+                    (overview?.previews_missing ?? 0) > 0
+                      ? ` · ${formatNumber(overview?.previews_missing ?? 0)} preview gaps`
+                      : ''}
                     {playlist.owner_name ? ` / ${playlist.owner_name}` : ''}
                   </p>
                   <p className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
@@ -518,24 +598,46 @@ export function AdminPlaylist() {
               )}
 
               {tracks.length > 0 && (
-                <ol className="mt-4 border-t border-line">
-                  {tracks.map((track, index) => (
-                    <li
-                      key={track.id}
-                      className="flex items-baseline gap-3 border-b border-line py-2"
-                    >
-                      <span className="w-5 shrink-0 font-mono text-[10px] text-muted">
-                        {String(index + 1).padStart(2, '0')}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="truncate text-sm leading-tight">{track.title}</p>
-                        <p className="truncate font-mono text-[9px] uppercase tracking-[0.12em] text-muted">
-                          {track.artists}
-                        </p>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
+                <>
+                  <ol className="mt-4 border-t border-line">
+                    {tracks.map((track, index) => (
+                      <li
+                        key={track.id}
+                        className="flex items-baseline gap-3 border-b border-line py-2"
+                      >
+                        <span className="w-5 shrink-0 font-mono text-[10px] text-muted">
+                          {String(index + 1).padStart(2, '0')}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm leading-tight">{track.title}</p>
+                          <p className="truncate font-mono text-[9px] uppercase tracking-[0.12em] text-muted">
+                            {track.artists}
+                          </p>
+                        </div>
+                        {!track.preview_url && (
+                          <span className="shrink-0 border border-danger/40 px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-[0.1em] text-danger">
+                            No preview
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-muted">
+                      Showing {formatNumber(tracks.length)} of {formatNumber(tracksTotal)} tracks
+                    </span>
+                    {tracks.length < tracksTotal && (
+                      <button
+                        type="button"
+                        onClick={() => void loadMoreTracks()}
+                        disabled={tracksLoading}
+                        className="btn-ghost"
+                      >
+                        {tracksLoading ? 'Loading…' : 'Load more tracks'}
+                      </button>
+                    )}
+                  </div>
+                </>
               )}
             </>
           ) : (
@@ -740,10 +842,10 @@ export function AdminPlaylist() {
               <button
                 type="button"
                 onClick={() => void fetchPreviews()}
-                disabled={backfilling}
+                disabled={backfilling || previewPending}
                 className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted underline decoration-line underline-offset-2 transition hover:text-ink disabled:opacity-50"
               >
-                {backfilling ? 'Fetching…' : 'Fetch missing previews'}
+                {backfilling || previewPending ? 'Fetching…' : 'Fetch missing previews'}
               </button>
             </div>
           </div>

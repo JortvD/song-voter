@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 
 import { useAuth } from '../context/AuthContext'
@@ -14,6 +14,9 @@ export function AuthCard() {
   const [inviteCode, setInviteCode] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const usernameRef = useRef<HTMLInputElement | null>(null)
+  const passwordRef = useRef<HTMLInputElement | null>(null)
+  const inviteRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     const invite = new URLSearchParams(window.location.search)
@@ -60,7 +63,21 @@ export function AuthCard() {
       setPassword('')
       setInviteCode('')
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'Something went wrong')
+      const message =
+        caught instanceof ApiError ? caught.message : 'Something went wrong'
+      setError(message)
+      const lower = message.toLowerCase()
+      window.requestAnimationFrame(() => {
+        if (lower.includes('invalid username or password')) {
+          usernameRef.current?.focus()
+        } else if (mode === 'register' && lower.includes('invite')) {
+          inviteRef.current?.focus()
+        } else if (lower.includes('password')) {
+          passwordRef.current?.focus()
+        } else {
+          usernameRef.current?.focus()
+        }
+      })
     } finally {
       setBusy(false)
     }
@@ -111,6 +128,7 @@ export function AuthCard() {
               Username
             </label>
             <input
+              ref={usernameRef}
               id="username"
               name="username"
               type="text"
@@ -128,6 +146,7 @@ export function AuthCard() {
               Password
             </label>
             <input
+              ref={passwordRef}
               id="password"
               name="password"
               type="password"
@@ -146,6 +165,7 @@ export function AuthCard() {
                 Invite code
               </label>
               <input
+                ref={inviteRef}
                 id="invite-code"
                 name="invite-code"
                 type="text"

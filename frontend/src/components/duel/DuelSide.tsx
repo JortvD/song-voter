@@ -152,6 +152,7 @@ export function DuelSide({
         type="button"
         onClick={onPick}
         disabled={disabled}
+        data-duel-pick={side}
         aria-label={`Pick ${track.title} by ${track.artists}, side ${label}`}
         className="pv-duel-label"
       >
@@ -169,6 +170,10 @@ export function DuelSide({
               .join(' · ')}
           </span>
         )}
+        <span className="pv-duel-mobile-pick" aria-hidden="true">
+          <span aria-hidden="true">{side === 'a' ? '←' : '→'}</span>
+          Pick {label}
+        </span>
       </button>
 
       <button

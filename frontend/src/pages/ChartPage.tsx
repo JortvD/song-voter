@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { Countdown } from '../components/Countdown'
 import { MixtapeCase } from '../components/MixtapeCase'
+import { SeasonUnavailable } from '../components/SeasonUnavailable'
 import { TrackDetailPanel } from '../components/TrackDetailPanel'
 import { TrackFilters } from '../components/TrackFilters'
 import { useAuth } from '../context/AuthContext'
@@ -304,7 +305,12 @@ function NoPlaylistState({ user }: { user: User | null }) {
 
 export function ChartPage() {
   const { user } = useAuth()
-  const { status, loading: playlistLoading, refresh: refreshPlaylist } = usePlaylist()
+  const {
+    status,
+    loading: playlistLoading,
+    error: playlistError,
+    refresh: refreshPlaylist,
+  } = usePlaylist()
   const [rows, setRows] = useState<Row[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -323,6 +329,8 @@ export function ChartPage() {
   const [genre, setGenre] = useState<string | null>(null)
   const sentinelRef = useRef<HTMLDivElement | null>(null)
   const loadMoreAbortRef = useRef<AbortController | null>(null)
+  const resultsStatusRef = useRef<HTMLParagraphElement | null>(null)
+  const focusAfterLoadRef = useRef(false)
 
   const filterKey = `${query}\u0000${artistId ?? ''}\u0000${decade ?? ''}\u0000${
     genre ?? ''
@@ -490,6 +498,7 @@ export function ChartPage() {
         controller.signal,
       )
       if (filterKeyRef.current !== requestKey) return
+      focusAfterLoadRef.current = true
       setRows((current) => [...current, ...data.tracks.map(normalizeOfficial)])
       setTotal(data.total)
       setAutoLoadPaused(false)
@@ -527,6 +536,12 @@ export function ChartPage() {
     genre,
     refreshPlaylist,
   ])
+
+  useEffect(() => {
+    if (!focusAfterLoadRef.current) return
+    focusAfterLoadRef.current = false
+    resultsStatusRef.current?.focus()
+  }, [rows.length])
 
   useEffect(() => {
     const node = sentinelRef.current
@@ -579,6 +594,18 @@ export function ChartPage() {
             />
           ))}
         </div>
+      </main>
+    )
+  }
+
+  if (!status && playlistError) {
+    return (
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 sm:py-10 lg:px-8">
+        <SeasonUnavailable
+          error={playlistError}
+          onRetry={refreshPlaylist}
+          title="The standings are unavailable."
+        />
       </main>
     )
   }
@@ -757,7 +784,6 @@ export function ChartPage() {
                         type="button"
                         onClick={() => toggleTrack(row.id)}
                         aria-expanded={expanded}
-                        aria-label={`${expanded ? 'Hide' : 'Show'} stats for ${row.title} by ${row.artists}`}
                         className="pv-list-row grid w-full grid-cols-[2.5rem_2.5rem_1fr] items-center gap-3 px-3 py-3 text-left transition hover:bg-paper sm:grid-cols-[2.5rem_2.5rem_1fr_auto]"
                       >
                         <span className="font-serif text-xl leading-none text-muted">
@@ -786,6 +812,9 @@ export function ChartPage() {
                             {Math.round(row.score)}
                           </span>
                         </div>
+                        <span className="sr-only">
+                          {expanded ? 'Hide stats' : 'Show stats'}
+                        </span>
                       </button>
 
                       {expanded && (
@@ -813,23 +842,31 @@ export function ChartPage() {
               </div>
             )}
 
-            {!loadingMore && rows.length < total && (
+            {rows.length < total && (
               <button
                 type="button"
+                aria-disabled={loadingMore}
                 onClick={() => {
+                  if (loadingMore) return
                   setAutoLoadPaused(false)
                   void loadMore()
                 }}
                 className="btn-ghost mt-4 w-full"
               >
-                {autoLoadPaused ? 'Try loading more again' : 'Load more'}
+                {loadingMore
+                  ? 'Loading more…'
+                  : autoLoadPaused
+                    ? 'Try loading more again'
+                    : 'Load more'}
               </button>
             )}
 
             <p
+              ref={resultsStatusRef}
+              tabIndex={-1}
               role="status"
               aria-live="polite"
-              className="mt-4 text-center font-mono text-[9px] uppercase tracking-[0.14em] text-muted"
+              className="mt-4 text-center font-mono text-[9px] uppercase tracking-[0.14em] text-muted outline-none"
             >
               Showing {formatNumber(rows.length)} of {formatNumber(total)}{' '}
               {hasFilters ? 'matches' : 'songs'}
@@ -841,6 +878,13 @@ export function ChartPage() {
             </p>
           </section>
         </>
+      ) : error ? (
+        <section role="alert" className="pv-card mt-6 p-6 text-center">
+          <p className="text-sm text-danger">{error}</p>
+          <button type="button" onClick={refresh} className="btn mt-3">
+            Try again
+          </button>
+        </section>
       ) : hasFilters ? (
         <section className="pv-card mt-6 p-6 text-center">
           <p className="text-sm text-muted">No songs match these filters.</p>

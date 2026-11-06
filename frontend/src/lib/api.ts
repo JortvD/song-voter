@@ -186,8 +186,8 @@ export const api = {
     request<{ started: boolean; missing: number }>('/api/admin/previews/backfill', {
       method: 'POST',
     }),
-  getTracks: (limit = 6) =>
-    request<TracksPage>(`/api/admin/playlist/tracks?limit=${limit}`),
+  getTracks: (limit = 6, offset = 0) =>
+    request<TracksPage>(`/api/admin/playlist/tracks?limit=${limit}&offset=${offset}`),
   getSpotifyStatus: () => request<SpotifyStatus>('/api/admin/spotify/status'),
   getSpotifyAuthorizeUrl: () =>
     request<{ url: string }>('/api/admin/spotify/authorize'),

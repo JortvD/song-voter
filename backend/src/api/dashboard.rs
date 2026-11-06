@@ -196,6 +196,7 @@ pub async fn users(
     let limit = query.limit.unwrap_or(50).clamp(1, 100);
     let offset = query.offset.unwrap_or(0).max(0);
     let search = query.q.unwrap_or_default().trim().to_string();
+    crate::error::validate_text_input(&search, "search")?;
 
     let total = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM users \
@@ -300,7 +301,7 @@ pub async fn users_csv(
         let _ = writeln!(
             &mut csv,
             "{},{},{},{},{},{}",
-            csv_field(&row.username),
+            crate::api::chart::csv_field(&row.username),
             row.is_admin,
             row.votes_cast,
             row.matchups_seen,
@@ -326,14 +327,6 @@ pub async fn users_csv(
         .map_err(ApiError::internal)
 }
 
-fn csv_field(value: &str) -> String {
-    if value.contains([',', '"', '\n', '\r']) {
-        format!("\"{}\"", value.replace('"', "\"\""))
-    } else {
-        value.to_string()
-    }
-}
-
 /// The shared ranking as seen by the admin, regardless of reveal state.
 pub async fn ranking(
     State(state): State<AppState>,
@@ -349,10 +342,14 @@ pub async fn ranking(
     let limit = query.limit.unwrap_or(50).clamp(1, 200);
     let offset = query.offset.unwrap_or(0).max(0);
     let search = query.q.unwrap_or_default().trim().to_string();
+    crate::error::validate_text_input(&search, "search")?;
     let genre = query
         .genre
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
+    if let Some(genre) = genre.as_deref() {
+        crate::error::validate_text_input(genre, "genre")?;
+    }
 
     Ok(Json(
         load_chart(

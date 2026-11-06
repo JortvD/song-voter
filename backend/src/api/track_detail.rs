@@ -304,8 +304,7 @@ async fn load_personal(
     .fetch_one(pool)
     .await?;
 
-    let recent_duels =
-        load_recent_duels(pool, playlist_id, track_id, Some(user_id)).await?;
+    let recent_duels = load_recent_duels(pool, playlist_id, track_id, Some(user_id)).await?;
     let losses = (votes.comparisons - votes.wins).max(0);
 
     Ok(PersonalTrackStats {
@@ -500,11 +499,7 @@ async fn load_artists(
             name: row.name,
             genre: row.genre,
             track_count: row.track_count,
-            average_rating: if revealed {
-                row.average_rating
-            } else {
-                None
-            },
+            average_rating: if revealed { row.average_rating } else { None },
         })
         .collect())
 }

@@ -542,7 +542,7 @@ pub fn extract_preview_url(html: &str) -> Option<String> {
     let start = normalized.find(MARKER)?;
     let rest = &normalized[start..];
     let end = rest
-        .find(|character: char| matches!(character, '"' | '\'' | '<' | ' ' | '\\' | '\n' | '\r'))
+        .find(['"', '\'', '<', ' ', '\\', '\n', '\r'])
         .unwrap_or(rest.len());
     let url = &rest[..end];
 

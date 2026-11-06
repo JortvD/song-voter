@@ -17,6 +17,7 @@ export function AdminRankingTable() {
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     let active = true
@@ -49,7 +50,7 @@ export function AdminRankingTable() {
     return () => {
       active = false
     }
-  }, [offset, query])
+  }, [offset, query, refreshKey])
 
   function applySearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -72,7 +73,11 @@ export function AdminRankingTable() {
         <div>
           <h2 className="label">Standings</h2>
           <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
-            {data ? `${formatNumber(data.total)} songs` : 'Loading…'}
+            {data
+              ? `${formatNumber(data.total)} songs`
+              : error
+                ? 'Unavailable'
+                : 'Loading…'}
           </p>
         </div>
 
@@ -97,17 +102,22 @@ export function AdminRankingTable() {
       </div>
 
       <div className="p-5">
-        {error && (
-          <p className="mb-4 border-l-2 border-danger bg-danger/5 px-3 py-2 text-xs text-danger">
-            {error}
-          </p>
-        )}
-
         {loading ? (
           <div className="space-y-2">
             {[0, 1, 2, 3, 4].map((index) => (
               <div key={index} className="h-10 animate-pulse border border-line bg-paper" />
             ))}
+          </div>
+        ) : error ? (
+          <div role="alert" className="border border-danger/40 bg-danger/5 px-4 py-6 text-center">
+            <p className="text-xs text-danger">{error}</p>
+            <button
+              type="button"
+              onClick={() => setRefreshKey((value) => value + 1)}
+              className="btn-ghost mt-3"
+            >
+              Try again
+            </button>
           </div>
         ) : data && data.tracks.length > 0 ? (
           <>

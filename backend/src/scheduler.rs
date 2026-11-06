@@ -106,9 +106,12 @@ async fn process_due_start(state: &AppState) -> anyhow::Result<()> {
     };
 
     let result: Result<_, ApiError> = async {
+        let connected = crate::spotify_auth::is_connected(&state.db)
+            .await
+            .unwrap_or(false);
         let (imported, _) = fetch_imported_playlist(client, &state.db, &due.spotify_id)
             .await
-            .map_err(|error| ApiError::service_unavailable(format!("{error:#}")))?;
+            .map_err(|error| crate::api::spotify::map_error(error, connected))?;
         finish_import(client, &state.db, &imported, due.imported_by).await
     }
     .await;

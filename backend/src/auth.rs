@@ -306,7 +306,7 @@ pub fn client_info(headers: &HeaderMap) -> (Option<String>, Option<String>) {
             headers
                 .get("x-forwarded-for")
                 .and_then(|value| value.to_str().ok())
-                .and_then(|value| value.split(',').last())
+                .and_then(|value| value.split(',').next_back())
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .map(|value| truncate(value, 64))

@@ -137,11 +137,10 @@ pub async fn next(
             .cloned()
             .ok_or_else(|| ApiError::internal(anyhow::anyhow!("selected high track is missing")))?;
 
-        let progress = user_progress(&mut *transaction, user.0.id, playlist.id).await?;
+        let progress = user_progress(&mut transaction, user.0.id, playlist.id).await?;
         let recent_duels =
-            recent_picked(&mut *transaction, user.0.id, playlist.id, RECENT_DUEL_LIMIT).await?;
-        let streak =
-            load_streak(&mut *transaction, user.0.id, query.tz.as_deref()).await?;
+            recent_picked(&mut transaction, user.0.id, playlist.id, RECENT_DUEL_LIMIT).await?;
+        let streak = load_streak(&mut transaction, user.0.id, query.tz.as_deref()).await?;
 
         transaction.commit().await?;
 

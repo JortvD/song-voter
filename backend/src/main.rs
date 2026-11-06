@@ -21,7 +21,11 @@ mod state;
 use std::time::Duration;
 
 use anyhow::Context;
+use axum::body::Body;
+use axum::extract::Request as ApiRequest;
 use axum::http::{header, HeaderName, HeaderValue, Request, StatusCode};
+use axum::middleware::{self, Next};
+use axum::response::Response;
 use axum::routing::get;
 use axum::Router;
 use sqlx::postgres::PgPoolOptions;
@@ -238,6 +242,50 @@ async fn bootstrap_admin(pool: &PgPool, config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Axum extractor/method rejections normally return plain text or an empty
+/// body, bypassing `ApiError`. Normalise those API responses to the documented
+/// JSON envelope without leaking serde/path internals.
+async fn json_api_errors(request: ApiRequest, next: Next) -> Response {
+    let response = next.run(request).await;
+    let status = response.status();
+    if !matches!(
+        status,
+        StatusCode::BAD_REQUEST
+            | StatusCode::METHOD_NOT_ALLOWED
+            | StatusCode::PAYLOAD_TOO_LARGE
+            | StatusCode::UNSUPPORTED_MEDIA_TYPE
+            | StatusCode::UNPROCESSABLE_ENTITY
+    ) {
+        return response;
+    }
+
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    if content_type.starts_with("application/json") {
+        return response;
+    }
+
+    let message = match status {
+        StatusCode::METHOD_NOT_ALLOWED => "method not allowed",
+        StatusCode::PAYLOAD_TOO_LARGE => "request body is too large",
+        StatusCode::UNSUPPORTED_MEDIA_TYPE => "unsupported content type; use application/json",
+        StatusCode::UNPROCESSABLE_ENTITY | StatusCode::BAD_REQUEST => "invalid request",
+        _ => "invalid request",
+    };
+    let body = serde_json::json!({ "error": message }).to_string();
+    let (mut parts, _) = response.into_parts();
+    parts.headers.remove(header::CONTENT_LENGTH);
+    parts.headers.remove(header::CONTENT_ENCODING);
+    parts.headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    Response::from_parts(parts, Body::from(body))
+}
+
 fn build_router(state: AppState, frontend_dir: &str) -> Router {
     // Playlist imports are admin-only and can involve dozens of Spotify pages
     // with rate-limit backoff. Keep the request timeout generous enough for a
@@ -283,6 +331,7 @@ fn build_router(state: AppState, frontend_dir: &str) -> Router {
         .route("/health", get(routes::health))
         .merge(api::router())
         .fallback(routes::api_not_found)
+        .layer(middleware::from_fn(json_api_errors))
         .layer(SetResponseHeaderLayer::overriding(
             header::CACHE_CONTROL,
             HeaderValue::from_static("no-store"),

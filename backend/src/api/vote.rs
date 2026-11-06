@@ -12,6 +12,7 @@ use crate::db::{user_progress, voting_block_reason_parts};
 use crate::elo;
 use crate::error::ApiError;
 use crate::models::MatchupTrack;
+use crate::ratings;
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -85,8 +86,7 @@ struct UndoableVote {
     track_low: Uuid,
     track_high: Uuid,
     winner: Uuid,
-    delta_low: f64,
-    delta_high: f64,
+    served_flip: bool,
     created_at: DateTime<Utc>,
 }
 
@@ -281,11 +281,17 @@ pub async fn undo(
     ensure_voting_allowed(&mut transaction, playlist_id).await?;
 
     let vote = sqlx::query_as::<_, UndoableVote>(
-        "SELECT id, track_low, track_high, winner, delta_low, delta_high, created_at \
-         FROM votes \
-         WHERE user_id = $1 AND playlist_id = $2 \
-         ORDER BY created_at DESC, id DESC LIMIT 1 \
-         FOR UPDATE",
+        "SELECT v.id, v.track_low, v.track_high, v.winner, \
+                COALESCE(sp.served_flip, FALSE) AS served_flip, v.created_at \
+         FROM votes v \
+         LEFT JOIN seen_pairs sp \
+           ON sp.user_id = v.user_id \
+          AND sp.playlist_id = v.playlist_id \
+          AND sp.track_low = v.track_low \
+          AND sp.track_high = v.track_high \
+         WHERE v.user_id = $1 AND v.playlist_id = $2 \
+         ORDER BY v.seq DESC LIMIT 1 \
+         FOR UPDATE OF v",
     )
     .bind(user.0.id)
     .bind(playlist_id)
@@ -297,39 +303,17 @@ pub async fn undo(
         return Err(ApiError::NotFound("you have no pick to undo".to_string()));
     };
 
-    // Lock both tracks before changing them, in the same order as voting.
-    lock_track(&mut transaction, vote.track_low, playlist_id).await?;
-    lock_track(&mut transaction, vote.track_high, playlist_id).await?;
-
-    // Subtract exactly this vote's deltas. Other users' votes stay intact.
-    sqlx::query(
-        "UPDATE tracks SET rating = rating - $1, \
-                          comparisons = GREATEST(comparisons - 1, 0), \
-                          wins = GREATEST(wins - $2, 0) \
-         WHERE id = $3",
-    )
-    .bind(vote.delta_low)
-    .bind(i32::from(vote.winner == vote.track_low))
-    .bind(vote.track_low)
-    .execute(&mut *transaction)
-    .await?;
-
-    sqlx::query(
-        "UPDATE tracks SET rating = rating - $1, \
-                          comparisons = GREATEST(comparisons - 1, 0), \
-                          wins = GREATEST(wins - $2, 0) \
-         WHERE id = $3",
-    )
-    .bind(vote.delta_high)
-    .bind(i32::from(vote.winner == vote.track_high))
-    .bind(vote.track_high)
-    .execute(&mut *transaction)
-    .await?;
-
     sqlx::query("DELETE FROM votes WHERE id = $1")
         .bind(vote.id)
         .execute(&mut *transaction)
         .await?;
+
+    // Undo must be the inverse of the pick, not a path-dependent subtraction
+    // of stored deltas. Replaying the remaining ledger keeps undo and the
+    // admin clear/delete rebuilds in agreement, including the audit trail.
+    // Locking all tracks in UUID order also avoids holding the two voted
+    // tracks while acquiring the rest.
+    ratings::rebuild_playlist_ratings(&mut transaction, playlist_id).await?;
 
     let tracks = sqlx::query_as::<_, MatchupTrack>(
         "SELECT id, spotify_id, title, artists, album, album_image_url, preview_url, duration_ms, \
@@ -352,10 +336,18 @@ pub async fn undo(
         .cloned()
         .ok_or_else(|| ApiError::internal(anyhow::anyhow!("undone high track is missing")))?;
 
-    let progress = user_progress(&mut *transaction, user.0.id, playlist_id).await?;
+    // Preserve the A/B orientation the voter originally saw. Returning the
+    // normalized UUID order here made roughly half of undos reappear mirrored.
+    let (track_a, track_b) = if vote.served_flip {
+        (high, low)
+    } else {
+        (low, high)
+    };
+
+    let progress = user_progress(&mut transaction, user.0.id, playlist_id).await?;
     let recent_duels =
-        recent_picked(&mut *transaction, user.0.id, playlist_id, RECENT_DUEL_LIMIT).await?;
-    let streak = load_streak(&mut *transaction, user.0.id, query.tz.as_deref()).await?;
+        recent_picked(&mut transaction, user.0.id, playlist_id, RECENT_DUEL_LIMIT).await?;
+    let streak = load_streak(&mut transaction, user.0.id, query.tz.as_deref()).await?;
 
     transaction.commit().await?;
 
@@ -366,8 +358,6 @@ pub async fn undo(
         track_low = %vote.track_low,
         track_high = %vote.track_high,
         winner = %vote.winner,
-        delta_low = %vote.delta_low,
-        delta_high = %vote.delta_high,
         votes_cast = progress.votes_cast,
         compared_pairs = progress.compared_pairs,
         "vote undone"
@@ -376,8 +366,8 @@ pub async fn undo(
     Ok(Json(UndoResponse {
         undone_vote_id: vote.id,
         playlist_id,
-        track_a: low,
-        track_b: high,
+        track_a,
+        track_b,
         winner: vote.winner,
         created_at: vote.created_at,
         compared_pairs: progress.compared_pairs,
@@ -394,8 +384,11 @@ async fn lock_track(
     playlist_id: Uuid,
 ) -> Result<VoteTrack, ApiError> {
     let track = sqlx::query_as::<_, VoteTrack>(
+        // FOR NO KEY UPDATE is enough: the vote only changes non-key columns.
+        // It is compatible with the KEY SHARE lock taken by seen_pairs' FK
+        // check, removing the vote/matchup deadlock cycle under load.
         "SELECT rating, comparisons FROM tracks \
-         WHERE id = $1 AND playlist_id = $2 FOR UPDATE",
+         WHERE id = $1 AND playlist_id = $2 FOR NO KEY UPDATE",
     )
     .bind(id)
     .bind(playlist_id)

@@ -164,6 +164,19 @@ pub async fn register(
     ))
 }
 
+/// Login must stay bounded even though registration already enforces the real
+/// username/password policy. Valid usernames are at most 32 characters; this
+/// slightly wider bound accepts legacy values while preventing megabyte audit
+/// rows and forged log lines.
+fn valid_login_username(value: &str) -> bool {
+    let length = value.chars().count();
+    (1..=64).contains(&length) && !value.chars().any(char::is_control)
+}
+
+fn valid_login_password(value: &str) -> bool {
+    (1..=128).contains(&value.chars().count())
+}
+
 pub async fn login(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -188,6 +201,14 @@ pub async fn login(
         return Err(ApiError::too_many_requests(
             "too many login attempts; wait a minute and try again",
         ));
+    }
+
+    // A login is not a registration: reject impossible credentials before any
+    // Argon2 work, audit write or log line. This keeps unauthenticated clients
+    // from turning failed logins into unbounded database/log growth and stops
+    // control characters from forging log records.
+    if !valid_login_username(&username_input) || !valid_login_password(&payload.password) {
+        return Err(ApiError::unauthorized("invalid username or password"));
     }
 
     let user = sqlx::query_as::<_, User>(
@@ -299,7 +320,7 @@ pub async fn logout(
     State(state): State<AppState>,
     headers: HeaderMap,
     jar: CookieJar,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, ApiError> {
     let (ip, user_agent) = client_info(&headers);
     let claims = jar
         .get(SESSION_COOKIE)
@@ -309,6 +330,17 @@ pub async fn logout(
         Some(claims) => (Some(claims.sub), Some(claims.username)),
         None => (None, None),
     };
+
+    // Clearing the browser cookie alone is not enough: a copied JWT would stay
+    // valid for its full TTL. Bumping session_version invalidates every token
+    // issued for this account, including this one.
+    if let Some(user_id) = user_id {
+        sqlx::query("UPDATE users SET session_version = session_version + 1 WHERE id = $1")
+            .bind(user_id)
+            .execute(&state.db)
+            .await?;
+        state.auth_cache.invalidate(user_id);
+    }
 
     audit::record(
         &state.db,
@@ -333,9 +365,26 @@ pub async fn logout(
         tracing::info!("logout requested without a valid session");
     }
 
-    jar.remove(state.auth.removal_cookie())
+    Ok(jar.remove(state.auth.removal_cookie()))
 }
 
 pub async fn me(user: AuthUser) -> Json<User> {
     Json(user.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{valid_login_password, valid_login_username};
+
+    #[test]
+    fn login_inputs_are_bounded_and_control_free() {
+        assert!(valid_login_username("voter_anna"));
+        assert!(!valid_login_username(""));
+        assert!(!valid_login_username(&"a".repeat(65)));
+        assert!(!valid_login_username("forged\nlog line"));
+        assert!(!valid_login_username("nul\0byte"));
+        assert!(valid_login_password("voter-password-123"));
+        assert!(!valid_login_password(""));
+        assert!(!valid_login_password(&"a".repeat(129)));
+    }
 }

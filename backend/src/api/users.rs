@@ -114,8 +114,8 @@ pub async fn delete_user(
 ) -> Result<Json<DeleteUserResponse>, ApiError> {
     let (ip, user_agent) = client_info(&headers);
     let mut transaction = state.db.begin().await?;
-    lock_user_management(&mut *transaction).await?;
-    let target = lock_user(&mut *transaction, id).await?;
+    lock_user_management(&mut transaction).await?;
+    let target = lock_user(&mut transaction, id).await?;
 
     if target.id == admin.0.id {
         transaction.rollback().await.ok();
@@ -131,7 +131,7 @@ pub async fn delete_user(
 
     if target.is_admin
         && target.disabled_at.is_none()
-        && enabled_admin_count(&mut *transaction).await? <= 1
+        && enabled_admin_count(&mut transaction).await? <= 1
     {
         transaction.rollback().await.ok();
         return Err(ApiError::conflict(
@@ -167,7 +167,7 @@ pub async fn delete_user(
     let mut tracks_updated = 0;
 
     for playlist_id in &playlist_ids {
-        let summary = ratings::rebuild_playlist_ratings(&mut *transaction, *playlist_id).await?;
+        let summary = ratings::rebuild_playlist_ratings(&mut transaction, *playlist_id).await?;
         votes_replayed += summary.votes_replayed;
         tracks_updated += summary.tracks_updated;
     }
@@ -226,7 +226,7 @@ pub async fn clear_votes(
 
     let (ip, user_agent) = client_info(&headers);
     let mut transaction = state.db.begin().await?;
-    let target = lock_user(&mut *transaction, id).await?;
+    let target = lock_user(&mut transaction, id).await?;
 
     let playlist = sqlx::query_as::<_, (Uuid, String)>(
         "SELECT id, name FROM playlists WHERE is_active LIMIT 1",
@@ -254,7 +254,7 @@ pub async fn clear_votes(
             .rows_affected() as i64;
 
     let summary = if deleted_votes > 0 {
-        ratings::rebuild_playlist_ratings(&mut *transaction, playlist.0).await?
+        ratings::rebuild_playlist_ratings(&mut transaction, playlist.0).await?
     } else {
         ratings::RebuildSummary {
             votes_replayed: 0,
@@ -421,8 +421,8 @@ pub async fn set_disabled(
 ) -> Result<Json<SetDisabledResponse>, ApiError> {
     let (ip, user_agent) = client_info(&headers);
     let mut transaction = state.db.begin().await?;
-    lock_user_management(&mut *transaction).await?;
-    let target = lock_user(&mut *transaction, id).await?;
+    lock_user_management(&mut transaction).await?;
+    let target = lock_user(&mut transaction, id).await?;
 
     if payload.disabled && target.id == admin.0.id {
         transaction.rollback().await.ok();
@@ -432,7 +432,7 @@ pub async fn set_disabled(
     if payload.disabled
         && target.is_admin
         && target.disabled_at.is_none()
-        && enabled_admin_count(&mut *transaction).await? <= 1
+        && enabled_admin_count(&mut transaction).await? <= 1
     {
         transaction.rollback().await.ok();
         return Err(ApiError::conflict(

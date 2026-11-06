@@ -224,11 +224,22 @@ pub async fn sync_track_artists(
         .map(|(id, spotify_id)| (spotify_id, id))
         .collect();
 
+    let imported_spotify_ids: Vec<String> = tracks
+        .iter()
+        .map(|track| track.spotify_id.clone())
+        .collect();
+
+    // Only rebuild links for tracks present in this import. Tracks removed from
+    // Spotify are intentionally retained for history, and their artist/genre
+    // links must survive a re-sync too.
     sqlx::query(
         "DELETE FROM track_artists USING tracks \
-         WHERE track_artists.track_id = tracks.id AND tracks.playlist_id = $1",
+         WHERE track_artists.track_id = tracks.id \
+           AND tracks.playlist_id = $1 \
+           AND tracks.spotify_id = ANY($2)",
     )
     .bind(playlist_id)
+    .bind(&imported_spotify_ids)
     .execute(pool)
     .await?;
 

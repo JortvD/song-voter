@@ -42,6 +42,7 @@ pub struct ImportSummary {
 pub struct PlaylistOverview {
     playlist: Option<Playlist>,
     track_count: i64,
+    previews_missing: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -78,9 +79,11 @@ pub async fn import(
         "playlist import started"
     );
 
-    let (imported, connected) = fetch_imported_playlist(client, &state.db, &spotify_id)
+    let connected = spotify_auth::is_connected(&state.db).await.unwrap_or(false);
+    let (imported, connected_mode) = fetch_imported_playlist(client, &state.db, &spotify_id)
         .await
-        .map_err(|error| map_error(error, true))?;
+        .map_err(|error| map_error(error, connected))?;
+    let connected = connected_mode;
 
     tracing::info!(
         admin_id = %admin.0.id,
@@ -104,10 +107,23 @@ pub(crate) async fn fetch_imported_playlist(
     spotify_id: &str,
 ) -> Result<(ImportedPlaylist, bool), SpotifyError> {
     match spotify_auth::user_access_token(client, pool).await? {
-        Some(token) => Ok((
-            client.fetch_playlist_with_token(spotify_id, &token).await?,
-            true,
-        )),
+        Some(token) => {
+            match client.fetch_playlist_with_token(spotify_id, &token).await {
+                Ok(playlist) => Ok((playlist, true)),
+                Err(SpotifyError::Unauthorized) => {
+                    // A user token can be rejected before its recorded expiry.
+                    // Refresh once, then retry; do not report this as a bad app
+                    // client secret.
+                    let token = spotify_auth::force_refresh_user_token(client, pool).await?;
+                    match client.fetch_playlist_with_token(spotify_id, &token).await {
+                        Ok(playlist) => Ok((playlist, true)),
+                        Err(SpotifyError::Unauthorized) => Err(SpotifyError::Reconnect),
+                        Err(error) => Err(error),
+                    }
+                }
+                Err(error) => Err(error),
+            }
+        }
         None => Ok((client.fetch_playlist(spotify_id).await?, false)),
     }
 }
@@ -118,12 +134,26 @@ pub(crate) async fn fetch_playlist_info(
     spotify_id: &str,
 ) -> Result<(ImportedPlaylistInfo, bool), SpotifyError> {
     match spotify_auth::user_access_token(client, pool).await? {
-        Some(token) => Ok((
-            client
+        Some(token) => {
+            match client
                 .fetch_playlist_info_with_token(spotify_id, &token)
-                .await?,
-            true,
-        )),
+                .await
+            {
+                Ok(info) => Ok((info, true)),
+                Err(SpotifyError::Unauthorized) => {
+                    let token = spotify_auth::force_refresh_user_token(client, pool).await?;
+                    match client
+                        .fetch_playlist_info_with_token(spotify_id, &token)
+                        .await
+                    {
+                        Ok(info) => Ok((info, true)),
+                        Err(SpotifyError::Unauthorized) => Err(SpotifyError::Reconnect),
+                        Err(error) => Err(error),
+                    }
+                }
+                Err(error) => Err(error),
+            }
+        }
         None => Ok((client.fetch_playlist_info(spotify_id).await?, false)),
     }
 }
@@ -247,9 +277,11 @@ pub async fn schedule_playlist(
         )
     })?;
 
-    let (info, connected) = fetch_playlist_info(client, &state.db, &spotify_id)
+    let connected = spotify_auth::is_connected(&state.db).await.unwrap_or(false);
+    let (info, connected_mode) = fetch_playlist_info(client, &state.db, &spotify_id)
         .await
-        .map_err(|error| map_error(error, true))?;
+        .map_err(|error| map_error(error, connected))?;
+    let connected = connected_mode;
     tracing::info!(
         admin_id = %admin.0.id,
         spotify_playlist_id = %info.spotify_id,
@@ -445,9 +477,10 @@ pub async fn start_playlist_now(
     }
 
     let result = async {
+        let connected = spotify_auth::is_connected(&state.db).await.unwrap_or(false);
         let (imported, _) = fetch_imported_playlist(client, &state.db, &playlist.spotify_id)
             .await
-            .map_err(|error| map_error(error, true))?;
+            .map_err(|error| map_error(error, connected))?;
         finish_import(client, &state.db, &imported, playlist.imported_by).await
     }
     .await;
@@ -685,19 +718,23 @@ pub async fn overview(
 ) -> Result<Json<PlaylistOverview>, ApiError> {
     let playlist = active_playlist(&state.db).await?;
 
-    let track_count = match &playlist {
+    let (track_count, previews_missing) = match &playlist {
         Some(playlist) => {
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tracks WHERE playlist_id = $1")
-                .bind(playlist.id)
-                .fetch_one(&state.db)
-                .await?
+            sqlx::query_as::<_, (i64, i64)>(
+                "SELECT COUNT(*), COUNT(*) FILTER (WHERE preview_url IS NULL) \
+             FROM tracks WHERE playlist_id = $1",
+            )
+            .bind(playlist.id)
+            .fetch_one(&state.db)
+            .await?
         }
-        None => 0,
+        None => (0, 0),
     };
 
     Ok(Json(PlaylistOverview {
         playlist,
         track_count,
+        previews_missing,
     }))
 }
 
@@ -831,6 +868,37 @@ async fn persist_import(
 
         builder.build().execute(&mut *transaction).await?;
     }
+
+    // Tracks removed from Spotify are kept for history. Put them after the
+    // freshly imported positions so a re-sync cannot leave duplicate positions.
+    let imported_spotify_ids: Vec<String> = imported
+        .tracks
+        .iter()
+        .map(|track| track.spotify_id.clone())
+        .collect();
+    let next_position = imported
+        .tracks
+        .iter()
+        .map(|track| track.position)
+        .max()
+        .unwrap_or(-1)
+        + 1;
+    sqlx::query(
+        "WITH retained AS ( \
+             SELECT id, ROW_NUMBER() OVER (ORDER BY position, id) AS rn \
+             FROM tracks \
+             WHERE playlist_id = $1 \
+               AND NOT (spotify_id = ANY($2)) \
+         ) \
+         UPDATE tracks t \
+         SET position = $3::int + (retained.rn - 1)::int \
+         FROM retained WHERE t.id = retained.id",
+    )
+    .bind(playlist.id)
+    .bind(&imported_spotify_ids)
+    .bind(next_position)
+    .execute(&mut *transaction)
+    .await?;
 
     let total_tracks =
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tracks WHERE playlist_id = $1")

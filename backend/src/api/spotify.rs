@@ -207,8 +207,21 @@ pub fn map_error(error: SpotifyError, connected: bool) -> ApiError {
         ),
         SpotifyError::Api { status, message } => {
             tracing::error!(status, message = %message, "Spotify API error");
-            ApiError::internal(anyhow::anyhow!("Spotify API error ({status})"))
+            if status >= 500 {
+                ApiError::service_unavailable(
+                    "Spotify is temporarily unavailable; try again in a minute",
+                )
+            } else {
+                ApiError::internal(anyhow::anyhow!("Spotify API error ({status})"))
+            }
         }
-        SpotifyError::Other(error) => ApiError::Internal(error),
+        SpotifyError::Other(error) => {
+            // Transport/DNS/TLS and response-parse failures are upstream
+            // availability problems, not a bug in this application.
+            tracing::error!(error = ?error, "could not reach or parse Spotify");
+            ApiError::service_unavailable(
+                "Could not reach Spotify. Check the connection and try again.",
+            )
+        }
     }
 }

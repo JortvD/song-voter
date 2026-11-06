@@ -104,6 +104,18 @@ impl From<anyhow::Error> for ApiError {
     }
 }
 
+/// Reject control characters before they reach PostgreSQL. NUL bytes in
+/// particular cause a database encoding error, which would otherwise become a
+/// 500 for a user-supplied search or filter value.
+pub fn validate_text_input(value: &str, label: &str) -> Result<(), ApiError> {
+    if value.chars().any(|character| character.is_control()) {
+        return Err(ApiError::bad_request(format!(
+            "{label} contains invalid characters"
+        )));
+    }
+    Ok(())
+}
+
 /// PostgreSQL unique-violation (23505) detection.
 pub fn is_unique_violation(error: &sqlx::Error) -> bool {
     matches!(

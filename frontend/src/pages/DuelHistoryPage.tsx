@@ -231,7 +231,7 @@ function DuelHistoryScreen() {
               className={`pv-tab ${status === filter.key ? 'pv-tab-active' : ''}`}
             >
               {filter.label}
-              <span className="ml-1 opacity-60">
+              <span className="ml-1">
                 {countForFilter(page, filter.key)}
               </span>
             </button>

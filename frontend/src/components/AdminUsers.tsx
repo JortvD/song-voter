@@ -107,7 +107,11 @@ export function AdminUsers() {
         <div>
           <h2 className="label">Voters</h2>
           <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
-            {data ? `${formatNumber(data.total)} registered` : 'Loading…'}
+            {data
+              ? `${formatNumber(data.total)} registered`
+              : error
+                ? 'Unavailable'
+                : 'Loading…'}
           </p>
         </div>
 
@@ -147,12 +151,6 @@ export function AdminUsers() {
       </div>
 
       <div className="p-5">
-        {error && (
-          <p className="mb-4 border-l-2 border-danger bg-danger/5 px-3 py-2 text-xs text-danger">
-            {error}
-          </p>
-        )}
-
         {notice && (
           <p className="mb-4 border-l-2 border-ok bg-ok/5 px-3 py-2 text-xs text-ok">
             {notice}
@@ -164,6 +162,17 @@ export function AdminUsers() {
             {[0, 1, 2, 3].map((index) => (
               <div key={index} className="h-10 animate-pulse border border-line bg-paper" />
             ))}
+          </div>
+        ) : error ? (
+          <div role="alert" className="border border-danger/40 bg-danger/5 px-4 py-6 text-center">
+            <p className="text-xs text-danger">{error}</p>
+            <button
+              type="button"
+              onClick={() => setRefreshKey((value) => value + 1)}
+              className="btn-ghost mt-3"
+            >
+              Try again
+            </button>
           </div>
         ) : data && data.users.length > 0 ? (
           <>

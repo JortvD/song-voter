@@ -66,6 +66,7 @@ export type Track = {
 export type PlaylistOverview = {
   playlist: Playlist | null
   track_count: number
+  previews_missing: number
 }
 
 export type ImportSummary = {

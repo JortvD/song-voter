@@ -71,7 +71,6 @@ function TrackRow({
         type="button"
         onClick={() => onToggle(entry.track.id)}
         aria-expanded={expanded}
-        aria-label={`${expanded ? 'Hide' : 'Show'} stats for ${entry.track.title} by ${entry.track.artists}`}
         className={`pv-list-row grid w-full grid-cols-[2.5rem_2.5rem_1fr_auto] items-center gap-3 px-3 py-3 text-left transition hover:bg-paper ${
           highlight ? 'bg-[var(--playlist-accent-tint)]' : ''
         }`}
@@ -102,6 +101,9 @@ function TrackRow({
             {Math.round(entry.rating)}
           </span>
         </div>
+        <span className="sr-only">
+          {expanded ? 'Hide stats' : 'Show stats'}
+        </span>
       </button>
 
       {expanded && (

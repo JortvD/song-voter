@@ -64,6 +64,51 @@ pub async fn user_access_token(
     Ok(Some(tokens.access_token))
 }
 
+/// Whether a Spotify user connection exists, without touching the token.
+pub async fn is_connected(pool: &PgPool) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM spotify_credentials WHERE id = TRUE)",
+    )
+    .fetch_one(pool)
+    .await
+}
+
+/// Force a refresh-token grant even when the stored access token still claims
+/// to be valid. Used when Spotify rejects a user token with 401.
+pub async fn force_refresh_user_token(
+    client: &SpotifyClient,
+    pool: &PgPool,
+) -> Result<String, SpotifyError> {
+    let stored = sqlx::query_as::<_, StoredCredentials>(
+        "SELECT access_token, refresh_token, expires_at \
+         FROM spotify_credentials WHERE id = TRUE",
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| SpotifyError::Other(error.into()))?
+    .ok_or(SpotifyError::Reconnect)?;
+
+    tracing::info!("Spotify user access token rejected; forcing refresh");
+    let tokens = client.refresh_user_token(&stored.refresh_token).await?;
+    let refresh_token = tokens.refresh_token.unwrap_or(stored.refresh_token);
+    let expires_at = Utc::now() + Duration::seconds(tokens.expires_in.max(60));
+
+    sqlx::query(
+        "UPDATE spotify_credentials \
+         SET access_token = $1, refresh_token = $2, expires_at = $3, updated_at = now() \
+         WHERE id = TRUE",
+    )
+    .bind(&tokens.access_token)
+    .bind(&refresh_token)
+    .bind(expires_at)
+    .execute(pool)
+    .await
+    .map_err(|error| SpotifyError::Other(error.into()))?;
+
+    tracing::info!(expires_at = %expires_at, "Spotify user access token refreshed after 401");
+    Ok(tokens.access_token)
+}
+
 pub async fn connect(
     client: &SpotifyClient,
     pool: &PgPool,

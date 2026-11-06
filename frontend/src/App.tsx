@@ -103,7 +103,10 @@ function App() {
       <Header />
       <PlaylistErrorBanner />
 
-      <div id="main" className="flex flex-1 flex-col">
+      <div
+        id="main"
+        className="flex min-h-[calc(100svh-4rem)] flex-1 flex-col"
+      >
         <Suspense fallback={<PageFallback />}>
           <Routes>
             <Route path="/" element={<HomePage />} />

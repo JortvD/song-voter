@@ -103,6 +103,10 @@ pub async fn artists(
 ) -> Result<Json<Value>, ApiError> {
     let playlist = revealed_playlist(&state).await?;
     let (search, decade, genre, artist) = parsed_filters(&query);
+    crate::error::validate_text_input(&search, "search")?;
+    if let Some(genre) = genre.as_deref() {
+        crate::error::validate_text_input(genre, "genre")?;
+    }
     let (limit, offset) = paging(&query);
     let key = format!(
         "chart:artists:{}:{limit}:{offset}:{}:{:?}:{:?}:{:?}",
@@ -139,6 +143,10 @@ pub async fn albums(
 ) -> Result<Json<Value>, ApiError> {
     let playlist = revealed_playlist(&state).await?;
     let (search, decade, genre, artist) = parsed_filters(&query);
+    crate::error::validate_text_input(&search, "search")?;
+    if let Some(genre) = genre.as_deref() {
+        crate::error::validate_text_input(genre, "genre")?;
+    }
     let (limit, offset) = paging(&query);
     let key = format!(
         "chart:albums:{}:{limit}:{offset}:{}:{:?}:{:?}:{:?}",

@@ -111,11 +111,15 @@ pub async fn personal(
     let limit = query.limit.unwrap_or(50).clamp(1, 200);
     let offset = query.offset.unwrap_or(0).max(0);
     let search = query.q.unwrap_or_default().trim().to_string();
+    crate::error::validate_text_input(&search, "search")?;
     let search_lower = search.to_lowercase();
     let genre = query
         .genre
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
+    if let Some(genre) = genre.as_deref() {
+        crate::error::validate_text_input(genre, "genre")?;
+    }
     let started = Instant::now();
 
     let (by_id, votes) = user_tracks_and_votes(&state.db, user.0.id, playlist.id).await?;
@@ -328,7 +332,7 @@ pub async fn summary(
     });
 
     let mut connection = state.db.acquire().await?;
-    let streak = load_streak(&mut *connection, user.0.id, query.tz.as_deref()).await?;
+    let streak = load_streak(&mut connection, user.0.id, query.tz.as_deref()).await?;
 
     Ok(Json(PersonalSummaryResponse {
         playlist_id: playlist.id,
@@ -369,7 +373,7 @@ async fn user_tracks_and_votes(
     let votes = sqlx::query_as::<_, PersonalVote>(
         "SELECT track_low, track_high, winner FROM votes \
          WHERE user_id = $1 AND playlist_id = $2 \
-         ORDER BY created_at ASC, id ASC",
+         ORDER BY seq ASC",
     )
     .bind(user_id)
     .bind(playlist_id)

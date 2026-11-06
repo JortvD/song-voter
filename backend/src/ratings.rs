@@ -133,7 +133,7 @@ pub async fn rebuild_playlist_ratings(
     let votes = sqlx::query_as::<_, ReplayVote>(
         "SELECT id, track_low, track_high, winner, created_at \
          FROM votes WHERE playlist_id = $1 \
-         ORDER BY created_at ASC, id ASC",
+         ORDER BY seq ASC",
     )
     .bind(playlist_id)
     .fetch_all(&mut *connection)

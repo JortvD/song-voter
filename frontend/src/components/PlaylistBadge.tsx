@@ -9,7 +9,7 @@ type PlaylistBadgeProps = {
 export function PlaylistBadge({ status, loading = false, compact = false }: PlaylistBadgeProps) {
   if (loading) {
     return (
-      <div className="flex min-w-0 items-center gap-2.5">
+      <div className="flex min-h-[41px] min-w-0 items-center gap-2.5">
         <span className="size-9 animate-pulse rounded-lg border-2 border-line bg-card" />
         <span className="min-w-0 flex-1">
           <span className="block h-2 w-16 animate-pulse rounded bg-line/70" />
@@ -23,7 +23,7 @@ export function PlaylistBadge({ status, loading = false, compact = false }: Play
   const cover = status?.playlist_image_url
 
   return (
-    <div className="flex min-w-0 items-center gap-2.5">
+    <div className="flex min-h-[41px] min-w-0 items-center gap-2.5">
       <span className="pv-cover-thumb" aria-hidden="true">
         {cover ? (
           <img src={cover} alt="" loading="lazy" />

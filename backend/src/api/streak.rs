@@ -1,4 +1,5 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
+use std::sync::OnceLock;
 
 use chrono::{Duration, NaiveDate};
 use serde::{Deserialize, Serialize};
@@ -10,6 +11,10 @@ use crate::error::ApiError;
 
 /// The last seven days are returned for the streak strip.
 const WEEK_DAYS: i64 = 7;
+
+/// IANA names are static for the life of the process. Loading them once avoids
+/// a 35–79 ms `pg_timezone_names` scan on every matchup/summary request.
+static TIMEZONE_NAMES: OnceLock<HashSet<String>> = OnceLock::new();
 
 #[derive(Debug, Default, Deserialize)]
 pub struct StreakQuery {
@@ -58,9 +63,8 @@ pub async fn load_streak(
         .fetch_one(&mut *connection)
         .await?;
 
-    let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
-        "SELECT (v.created_at AT TIME ZONE ",
-    );
+    let mut builder: QueryBuilder<Postgres> =
+        QueryBuilder::new("SELECT (v.created_at AT TIME ZONE ");
     builder.push_bind(&timezone);
     builder.push(
         ")::date AS day, COUNT(*) AS picks \
@@ -75,10 +79,8 @@ pub async fn load_streak(
         .fetch_all(&mut *connection)
         .await?;
 
-    let counts: BTreeMap<NaiveDate, i64> = rows
-        .into_iter()
-        .map(|row| (row.day, row.picks))
-        .collect();
+    let counts: BTreeMap<NaiveDate, i64> =
+        rows.into_iter().map(|row| (row.day, row.picks)).collect();
 
     let goal = daily_streak_goal(connection).await?;
     let today_picks = counts.get(&today).copied().unwrap_or(0);
@@ -165,14 +167,24 @@ async fn resolve_timezone(
         return Ok("UTC".to_string());
     };
 
-    let exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS (SELECT 1 FROM pg_timezone_names WHERE name = $1)",
-    )
-    .bind(requested)
-    .fetch_one(&mut *connection)
-    .await?;
+    // A control character (notably NUL) would reach PostgreSQL as an invalid
+    // timezone name and turn a client input into a 500. Fall back to UTC.
+    if requested.chars().any(char::is_control) {
+        return Ok("UTC".to_string());
+    }
 
-    Ok(if exists {
+    let names = if let Some(names) = TIMEZONE_NAMES.get() {
+        names
+    } else {
+        let rows = sqlx::query_scalar::<_, String>("SELECT name FROM pg_timezone_names")
+            .fetch_all(&mut *connection)
+            .await?;
+        let loaded = rows.into_iter().collect::<HashSet<_>>();
+        let _ = TIMEZONE_NAMES.set(loaded);
+        TIMEZONE_NAMES.get().expect("timezone names were just set")
+    };
+
+    Ok(if names.contains(requested) {
         requested.to_string()
     } else {
         "UTC".to_string()

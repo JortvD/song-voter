@@ -112,11 +112,7 @@ impl Config {
 
         if production {
             if let Some(password) = admin_password.as_deref() {
-                anyhow::ensure!(
-                    !looks_like_placeholder(password) && password != "admin",
-                    "ADMIN_PASSWORD still uses an example or weak value; set a strong password \
-                     before running in production"
-                );
+                validate_admin_password(password, admin_username.as_deref())?;
             }
         }
 
@@ -164,6 +160,27 @@ fn non_empty(key: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+/// Production admin credentials must not be a known placeholder, a short
+/// password, or the same as the admin username. Operators can still choose any
+/// suitably long password; this only stops obviously unsafe configurations.
+fn validate_admin_password(password: &str, username: Option<&str>) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !looks_like_placeholder(password),
+        "ADMIN_PASSWORD still uses an example or weak value; set a strong password before running in production"
+    );
+    anyhow::ensure!(
+        password.chars().count() >= 12,
+        "ADMIN_PASSWORD must be at least 12 characters in production"
+    );
+    if let Some(username) = username {
+        anyhow::ensure!(
+            !password.eq_ignore_ascii_case(username),
+            "ADMIN_PASSWORD must not equal ADMIN_USERNAME in production"
+        );
+    }
+    Ok(())
+}
+
 /// Reject the values shipped in `.env.example` so a copied file cannot silently
 /// run production with a known password or signing key.
 fn looks_like_placeholder(value: &str) -> bool {
@@ -189,7 +206,7 @@ fn parse_bool(value: &str) -> anyhow::Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::looks_like_placeholder;
+    use super::{looks_like_placeholder, validate_admin_password};
 
     #[test]
     fn rejects_example_and_weak_values() {
@@ -211,5 +228,13 @@ mod tests {
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
         ));
         assert!(!looks_like_placeholder("a-long-random-admin-password"));
+    }
+
+    #[test]
+    fn production_admin_password_rejects_short_and_username_values() {
+        assert!(validate_admin_password("a", Some("admin")).is_err());
+        assert!(validate_admin_password("admin", Some("admin")).is_err());
+        assert!(validate_admin_password("change-me", Some("admin")).is_err());
+        assert!(validate_admin_password("a-long-random-password", Some("admin")).is_ok());
     }
 }

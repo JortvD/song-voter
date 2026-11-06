@@ -70,6 +70,9 @@
 
 html {
   scroll-behavior: smooth;
+  /* Keep focused controls clear of the fixed header and bottom navigation. */
+  scroll-padding-top: 5rem;
+  scroll-padding-bottom: 6rem;
 }
 
 html,
@@ -108,8 +111,10 @@ body::before {
 }
 
 :focus-visible {
-  outline: 3px solid var(--playlist-accent);
+  outline: 3px solid var(--playlist-accent-strong);
   outline-offset: 3px;
+  /* Do not let keyboard focus hide underneath the fixed bottom tabs. */
+  scroll-margin-block: 5rem;
 }
 
 @layer base {
@@ -161,7 +166,7 @@ body::before {
   }
 
   .field {
-    @apply w-full rounded-xl border-2 border-line bg-paper px-4 py-3 text-sm text-ink outline-none transition placeholder:text-muted/80 focus:border-ink;
+    @apply w-full rounded-xl border-2 border-muted bg-paper px-4 py-3 text-sm text-ink outline-none transition placeholder:text-muted focus:border-ink;
   }
 
   .pv-label {
@@ -279,7 +284,7 @@ body::before {
   }
 
   .pv-input {
-    @apply w-full rounded-xl border-2 border-line bg-paper px-4 py-3 text-sm text-ink outline-none transition placeholder:text-muted/80 focus:border-ink;
+    @apply w-full rounded-xl border-2 border-muted bg-paper px-4 py-3 text-sm text-ink outline-none transition placeholder:text-muted focus:border-ink;
   }
 
   .pv-mixtape-case {
@@ -384,7 +389,7 @@ body::before {
   }
 
   .pv-counter-cell-hint {
-    @apply mt-0.5 block truncate font-mono text-[7px] uppercase tracking-[0.12em] text-muted/80;
+    @apply mt-0.5 block truncate font-mono text-[7px] uppercase tracking-[0.12em] text-muted;
   }
 
   .pv-countdown {
@@ -650,16 +655,25 @@ body::before {
   }
 
   .pv-admin-input {
-    @apply w-full rounded-xl border-2 border-line bg-paper px-3 py-2 text-sm text-ink outline-none placeholder:text-muted/80 focus:border-ink;
+    @apply w-full rounded-xl border-2 border-muted bg-paper px-3 py-2 text-sm text-ink outline-none placeholder:text-muted focus:border-ink;
   }
 
   .pv-admin-nav-item {
-    @apply flex items-center justify-between gap-2 rounded-xl border-2 border-transparent px-3 py-2 text-left font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted transition hover:border-line hover:text-ink;
+    @apply flex items-center justify-between gap-2 rounded-xl border-2 border-transparent px-3 py-2 text-left font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted transition;
+  }
+
+  /* Do not let hover turn the active pill's label ink-on-ink. */
+  .pv-admin-nav-item:not(.pv-admin-nav-item-active):hover {
+    @apply border-line text-ink;
   }
 
   .pv-admin-nav-item-active {
     @apply border-ink bg-ink text-paper;
     box-shadow: 2px 2px 0 0 var(--playlist-accent);
+  }
+
+  .pv-admin-nav-item-active:hover {
+    color: var(--color-paper);
   }
 
   .pv-admin-meter {
@@ -934,7 +948,20 @@ body::before {
   }
 
   .pv-duel-meta {
-    @apply line-clamp-1 font-mono text-[7px] uppercase tracking-[0.13em] text-muted/80 sm:text-[8px];
+    @apply line-clamp-1 font-mono text-[7px] uppercase tracking-[0.13em] text-muted sm:text-[8px];
+  }
+
+  .pv-duel-mobile-pick {
+    @apply mt-1 inline-flex items-center gap-1 rounded-full border-2 border-ink px-2 py-1 font-mono text-[8px] font-semibold uppercase tracking-[0.12em];
+    background: var(--playlist-accent);
+    color: var(--playlist-accent-ink);
+    box-shadow: 2px 2px 0 0 var(--color-ink);
+  }
+
+  @media (min-width: 1024px) {
+    .pv-duel-mobile-pick {
+      display: none;
+    }
   }
 
   .pv-duel-pick-chip {
@@ -1009,7 +1036,7 @@ body::before {
   }
 
   .pv-duel-listen-time {
-    @apply mt-0.5 whitespace-nowrap font-mono text-[7px] leading-none tracking-[0.04em] opacity-75;
+    @apply mt-0.5 whitespace-nowrap font-mono text-[7px] leading-none tracking-[0.04em];
   }
 
   .pv-duel-listen-progress {
@@ -1188,7 +1215,12 @@ body::before {
   }
 
   .pv-recent-side.is-loser {
-    opacity: 0.42;
+    /* Keep the track title/artist readable; only the artwork is de-emphasised. */
+    background: rgb(20 26 42 / 0.03);
+  }
+
+  .pv-recent-side.is-loser .pv-recent-cover {
+    opacity: 0.55;
   }
 
   .pv-recent-cover {
@@ -1277,7 +1309,12 @@ body::before {
   }
 
   .pv-history-side.is-loser {
-    opacity: 0.5;
+    /* Keep the losing title/artist at full text contrast. */
+    background: rgb(20 26 42 / 0.03);
+  }
+
+  .pv-history-side.is-loser .pv-history-cover {
+    opacity: 0.55;
   }
 
   .pv-history-side.is-playing {
@@ -1953,5 +1990,12 @@ body::before {
   .pv-list-row {
     content-visibility: auto;
     contain-intrinsic-size: 64px;
+  }
+}
+
+/* Short landscape phones/tablets: keep the duel controls above the fixed tabs. */
+@media (max-height: 560px) {
+  .pv-duel-page {
+    padding-bottom: calc(7rem + env(safe-area-inset-bottom));
   }
 }

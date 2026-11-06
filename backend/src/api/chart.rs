@@ -224,10 +224,14 @@ pub async fn public(
     let limit = query.limit.unwrap_or(50).clamp(1, 200);
     let offset = query.offset.unwrap_or(0).max(0);
     let search = query.q.unwrap_or_default().trim().to_string();
+    crate::error::validate_text_input(&search, "search")?;
     let genre = query
         .genre
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
+    if let Some(genre) = genre.as_deref() {
+        crate::error::validate_text_input(genre, "genre")?;
+    }
 
     let key = format!(
         "chart:public:{}:{limit}:{offset}:{}:{:?}:{:?}:{:?}",
@@ -259,6 +263,10 @@ pub async fn public(
     Ok(Json(value))
 }
 
+// The filter arguments are kept explicit because this loader is shared by the
+// public chart and the admin ranking; a struct would add noise without making
+// the SQL construction clearer.
+#[allow(clippy::too_many_arguments)]
 pub async fn load_chart(
     pool: &PgPool,
     playlist: &Playlist,
@@ -269,6 +277,11 @@ pub async fn load_chart(
     genre: Option<&str>,
     artist: Option<Uuid>,
 ) -> Result<PublicChart, ApiError> {
+    crate::error::validate_text_input(search, "search")?;
+    if let Some(genre) = genre {
+        crate::error::validate_text_input(genre, "genre")?;
+    }
+
     const FILTER: &str = "t.playlist_id = $1 \
          AND ($2 = '' OR t.title ILIKE '%' || $2 || '%' \
               OR t.artists ILIKE '%' || $2 || '%' \
@@ -545,7 +558,7 @@ pub async fn export_csv(
             "attachment; filename=\"playlist-voter.csv\"",
         )
         .body(Body::from(csv))
-        .map_err(|error| ApiError::internal(error))
+        .map_err(ApiError::internal)
 }
 
 async fn build_status(pool: &PgPool, playlist: &Playlist) -> Result<ChartStatus, ApiError> {
@@ -659,11 +672,25 @@ async fn build_status(pool: &PgPool, playlist: &Playlist) -> Result<ChartStatus,
     })
 }
 
-fn csv_field(value: &str) -> String {
+pub(crate) fn csv_field(value: &str) -> String {
+    // Spreadsheet formula injection: quoting is not enough. Neutralise values
+    // whose first non-whitespace character could start a formula, then apply
+    // normal RFC-4180 quoting.
+    let first = value
+        .trim_start_matches([' ', '\t', '\r', '\n'])
+        .chars()
+        .next();
+    let dangerous = matches!(first, Some('=' | '+' | '-' | '@' | '\t' | '\r'));
+    let value = if dangerous {
+        format!("'{value}")
+    } else {
+        value.to_string()
+    };
+
     if value.contains([',', '"', '\n', '\r']) {
         format!("\"{}\"", value.replace('"', "\"\""))
     } else {
-        value.to_string()
+        value
     }
 }
 
@@ -677,5 +704,9 @@ mod tests {
         assert_eq!(csv_field("with, comma"), "\"with, comma\"");
         assert_eq!(csv_field("with \"quote\""), "\"with \"\"quote\"\"\"");
         assert_eq!(csv_field("line\nbreak"), "\"line\nbreak\"");
+        assert_eq!(csv_field("=HYPERLINK(\"x\")"), "\"'=HYPERLINK(\"\"x\"\")\"");
+        assert_eq!(csv_field("+1"), "'+1");
+        assert_eq!(csv_field("@cmd"), "'@cmd");
+        assert_eq!(csv_field("  -2"), "'  -2");
     }
 }

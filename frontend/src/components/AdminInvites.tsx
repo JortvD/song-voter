@@ -31,10 +31,14 @@ export function AdminInvites() {
   const [creating, setCreating] = useState(false)
   const [revoking, setRevoking] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
   const [copied, setCopied] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
+    setLoading(true)
+    setLoadError(null)
 
     api
       .listInvites()
@@ -43,7 +47,9 @@ export function AdminInvites() {
       })
       .catch((caught: unknown) => {
         if (active) {
-          setError(caught instanceof ApiError ? caught.message : 'Could not load invites')
+          setLoadError(
+            caught instanceof ApiError ? caught.message : 'Could not load invites',
+          )
         }
       })
       .finally(() => {
@@ -53,7 +59,7 @@ export function AdminInvites() {
     return () => {
       active = false
     }
-  }, [])
+  }, [reloadKey])
 
   async function createInvite() {
     setCreating(true)
@@ -139,6 +145,17 @@ export function AdminInvites() {
               <div key={index} className="h-12 animate-pulse border border-line bg-paper" />
             ))}
           </div>
+        ) : loadError ? (
+          <div role="alert" className="border border-danger/40 bg-danger/5 px-4 py-6 text-center">
+            <p className="text-xs text-danger">{loadError}</p>
+            <button
+              type="button"
+              onClick={() => setReloadKey((value) => value + 1)}
+              className="btn-ghost mt-3"
+            >
+              Try again
+            </button>
+          </div>
         ) : invites.length === 0 ? (
           <p className="border border-dashed border-line px-3 py-6 text-center text-xs text-muted">
             No invite codes yet. Generate one for each voter.
@@ -190,23 +207,23 @@ export function AdminInvites() {
                       {copied === invite.code ? 'Copied' : 'Copy code'}
                     </button>
                     {status === 'open' && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => void copyLink(invite.code)}
-                          className="border border-line px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-muted transition hover:border-ink hover:text-ink"
-                        >
-                          {copied === link ? 'Copied' : 'Copy link'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void revoke(invite)}
-                          disabled={revoking === invite.id}
-                          className="border border-danger/40 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-danger transition hover:border-danger disabled:opacity-40"
-                        >
-                          {revoking === invite.id ? 'Revoking…' : 'Revoke'}
-                        </button>
-                      </>
+                      <button
+                        type="button"
+                        onClick={() => void copyLink(invite.code)}
+                        className="border border-line px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-muted transition hover:border-ink hover:text-ink"
+                      >
+                        {copied === link ? 'Copied' : 'Copy link'}
+                      </button>
+                    )}
+                    {status !== 'used' && (
+                      <button
+                        type="button"
+                        onClick={() => void revoke(invite)}
+                        disabled={revoking === invite.id}
+                        className="border border-danger/40 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-danger transition hover:border-danger disabled:opacity-40"
+                      >
+                        {revoking === invite.id ? 'Revoking…' : 'Revoke'}
+                      </button>
                     )}
                   </div>
                 </li>

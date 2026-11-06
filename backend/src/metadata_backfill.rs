@@ -94,7 +94,14 @@ pub async fn start(
     tokio::spawn(async move {
         if let Err(error) = run(&client, &pool, playlist_id, run_id).await {
             tracing::error!(error = ?error, %playlist_id, %run_id, "metadata backfill failed");
-            let message = format!("{error:#}");
+            // Never persist raw Spotify response bodies in a user-visible run
+            // error. Log the full chain, store a client-safe mapped message.
+            let message = match error.downcast::<crate::spotify::SpotifyError>() {
+                Ok(spotify_error) => {
+                    crate::api::spotify::map_error(spotify_error, false).to_string()
+                }
+                Err(_) => "metadata backfill failed; see server logs".to_string(),
+            };
             let _ = sqlx::query(
                 "UPDATE metadata_backfill_runs \
                  SET status = 'failed', error = $2, finished_at = now() WHERE id = $1",
@@ -125,12 +132,23 @@ async fn run(
 
     let user_token = spotify_auth::user_access_token(client, pool).await?;
     let (imported, token) = match user_token {
-        Some(token) => (
-            client
-                .fetch_playlist_with_token(&spotify_id, &token)
-                .await?,
-            token,
-        ),
+        Some(mut token) => {
+            let imported = match client.fetch_playlist_with_token(&spotify_id, &token).await {
+                Ok(imported) => imported,
+                Err(SpotifyError::Unauthorized) => {
+                    token = spotify_auth::force_refresh_user_token(client, pool).await?;
+                    match client.fetch_playlist_with_token(&spotify_id, &token).await {
+                        Ok(imported) => imported,
+                        Err(SpotifyError::Unauthorized) => {
+                            return Err(SpotifyError::Reconnect.into())
+                        }
+                        Err(error) => return Err(error.into()),
+                    }
+                }
+                Err(error) => return Err(error.into()),
+            };
+            (imported, token)
+        }
         None => {
             let token = client.client_credentials_token().await?;
             let imported = client

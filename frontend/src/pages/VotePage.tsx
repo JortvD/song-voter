@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { Kbd } from '../components/Kbd'
 import { RequireAuth } from '../components/RequireAuth'
+import { SeasonUnavailable } from '../components/SeasonUnavailable'
 import { AutoplayToggle } from '../components/duel/AutoplayToggle'
 import { CassetteHub } from '../components/duel/CassetteHub'
 import { DuelCassette } from '../components/duel/DuelCassette'
@@ -44,6 +45,28 @@ function formatWhen(value: string | null) {
 
 function sleep(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+}
+
+function storedDuelKey(userId: string) {
+  return `pv-current-duel:${userId}`
+}
+
+function readStoredDuel(userId: string, playlistId: string): Matchup | null {
+  try {
+    const raw = window.sessionStorage.getItem(storedDuelKey(userId))
+    if (!raw) return null
+    const value = JSON.parse(raw) as Matchup
+    if (
+      value?.playlist_id === playlistId &&
+      value.track_a?.id &&
+      value.track_b?.id
+    ) {
+      return value
+    }
+  } catch {
+    // Storage can be disabled or contain an old/corrupt value.
+  }
+  return null
 }
 
 function smallViewportHeight() {
@@ -96,7 +119,12 @@ function DuelSkeleton() {
 
 function VoteScreen() {
   const { user } = useAuth()
-  const { status, loading: playlistLoading } = usePlaylist()
+  const {
+    status,
+    loading: playlistLoading,
+    error: playlistError,
+    refresh: refreshPlaylist,
+  } = usePlaylist()
   const [matchup, setMatchup] = useState<Matchup | null>(null)
   const [loading, setLoading] = useState(true)
   const [voting, setVoting] = useState(false)
@@ -128,6 +156,27 @@ function VoteScreen() {
     b: null,
   })
   const previousStreak = useRef<StreakSummary | null>(null)
+  const focusNextPickRef = useRef(false)
+  const exhaustedTitleRef = useRef<HTMLHeadingElement | null>(null)
+  const storageKey = user ? storedDuelKey(user.id) : null
+
+  useEffect(() => {
+    if (!storageKey || !matchup) return
+    try {
+      window.sessionStorage.setItem(storageKey, JSON.stringify(matchup))
+    } catch {
+      // Storage can be disabled; the in-memory duel still works.
+    }
+  }, [storageKey, matchup])
+
+  useEffect(() => {
+    if (!storageKey || !exhausted) return
+    try {
+      window.sessionStorage.removeItem(storageKey)
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [storageKey, exhausted])
 
   useEffect(() => {
     autoPreviewRef.current = autoPreview
@@ -297,10 +346,21 @@ function VoteScreen() {
 
   useEffect(() => {
     if (!user) return
+
+    const stored =
+      status?.playlist_id != null
+        ? readStoredDuel(user.id, status.playlist_id)
+        : null
+    if (stored) {
+      applyMatchup(stored)
+      setLoading(false)
+      return
+    }
+
     const controller = new AbortController()
     void load(controller.signal)
     return () => controller.abort()
-  }, [user, load])
+  }, [user, load, status?.playlist_id, applyMatchup])
 
   const matchupKey = matchup
     ? `${matchup.track_a.id}:${matchup.track_b.id}`
@@ -324,6 +384,29 @@ function VoteScreen() {
     nextSide.current = 'a'
   }, [matchupKey, cancelFade])
 
+  useEffect(() => {
+    if (!focusNextPickRef.current || voting || undoing) return
+    if (!matchup) return
+
+    focusNextPickRef.current = false
+    const frame = window.requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLButtonElement>('[data-duel-pick="a"]')
+        ?.focus()
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [matchupKey, matchup, voting, undoing])
+
+  useEffect(() => {
+    if (!exhausted) return
+    focusNextPickRef.current = false
+    const frame = window.requestAnimationFrame(() => {
+      exhaustedTitleRef.current?.focus()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [exhausted])
+
   useLayoutEffect(() => {
     if (!matchup) {
       setRecentHeight(null)
@@ -334,10 +417,6 @@ function VoteScreen() {
 
     const measure = () => {
       if (cancelled) return
-      if (window.innerWidth >= 1024) {
-        setRecentHeight(null)
-        return
-      }
 
       const stage = stageRef.current
       const card = cardRef.current
@@ -345,16 +424,15 @@ function VoteScreen() {
 
       const tabs = document.querySelector<HTMLElement>('nav[aria-label="Primary"]')
       const viewportHeight = smallViewportHeight()
-      const bottom = tabs
-        ? viewportHeight - tabs.offsetHeight
-        : viewportHeight - 64
-      // Measure in document space and use the small viewport height so
-      // scrolling or collapsing mobile browser chrome cannot grow the panel.
-      const stageTop = stage.getBoundingClientRect().top + window.scrollY
-      // On phones the auto-preview dock is absolute and hidden until scroll,
-      // so the card height is just the cassette and recent duels gets the rest.
+      const scroll = window.scrollY
+      // Work entirely in document space so scrolling/collapsing browser
+      // chrome cannot resize or shift the recent-duels panel.
+      const bottom = scroll + viewportHeight - (tabs?.offsetHeight ?? 64)
+      const stageTop = stage.getBoundingClientRect().top + scroll
       const available = bottom - stageTop - card.offsetHeight - 12 - 8
 
+      // Apply the same cap at every width, including desktop/tablet where an
+      // uncapped panel pushed the duel controls below the fold.
       setRecentHeight(Math.min(Math.max(Math.floor(available), 0), 190))
     }
     measure()
@@ -540,18 +618,22 @@ function VoteScreen() {
         ])
 
         if (nextResult.status === 'fulfilled') {
+          focusNextPickRef.current = true
           applyMatchup(nextResult.value)
         } else if (
           nextResult.reason instanceof ApiError &&
           nextResult.reason.status === 409
         ) {
+          focusNextPickRef.current = true
           setExhausted(true)
           setMatchup(null)
         } else {
+          focusNextPickRef.current = false
           setError("Your pick saved, but the next duel didn't load. Try again.")
           setMatchup(null)
         }
       } catch (caught) {
+        focusNextPickRef.current = false
         setError(
           caught instanceof ApiError ? caught.message : "That pick didn't save. Try again.",
         )
@@ -581,6 +663,7 @@ function VoteScreen() {
       setExhausted(false)
       setPickedId(null)
       setRecentDuels(undone.recent_duels ?? [])
+      focusNextPickRef.current = true
       setMatchup({
         playlist_id: undone.playlist_id,
         playlist_name: playlistName || 'Playlist Voter',
@@ -655,11 +738,29 @@ function VoteScreen() {
 
   const busy = voting || undoing
 
-  if (playlistLoading || !status) {
+  if (playlistLoading) {
     return (
       <main className="pv-duel-page mx-auto flex w-full max-w-6xl flex-1 flex-col px-3 pt-3 sm:px-6 sm:pt-4 lg:px-8">
         <div className="my-auto">
           <DuelSkeleton />
+        </div>
+      </main>
+    )
+  }
+
+  if (!status) {
+    return (
+      <main className="pv-duel-page mx-auto flex w-full max-w-6xl flex-1 flex-col px-3 pt-3 sm:px-6 sm:pt-4 lg:px-8">
+        <div className="my-auto">
+          {playlistError ? (
+            <SeasonUnavailable
+              error={playlistError}
+              onRetry={refreshPlaylist}
+              title="The duel is unavailable."
+            />
+          ) : (
+            <DuelSkeleton />
+          )}
         </div>
       </main>
     )
@@ -744,7 +845,11 @@ function VoteScreen() {
           ) : exhausted ? (
             <section className="pv-duel-empty my-auto">
               <span className="pv-sticker">All duels done</span>
-              <h1 className="mt-3 font-serif text-3xl leading-none tracking-[-0.03em] sm:text-4xl">
+              <h1
+                ref={exhaustedTitleRef}
+                tabIndex={-1}
+                className="mt-3 font-serif text-3xl leading-none tracking-[-0.03em] outline-none sm:text-4xl"
+              >
                 You&apos;ve heard every side.
               </h1>
               <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-muted">

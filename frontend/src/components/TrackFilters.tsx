@@ -115,7 +115,7 @@ export function TrackFilters({
             placeholder={searchPlaceholder}
             autoComplete="off"
             spellCheck={false}
-            className="w-full rounded-lg border-2 border-line bg-paper py-1.5 pl-8 pr-8 text-sm text-ink outline-none transition placeholder:text-muted/80 focus:border-ink [&::-webkit-search-cancel-button]:hidden"
+            className="w-full rounded-lg border-2 border-muted bg-paper py-1.5 pl-8 pr-8 text-sm text-ink outline-none transition placeholder:text-muted focus:border-ink [&::-webkit-search-cancel-button]:hidden"
           />
           {search && (
             <button

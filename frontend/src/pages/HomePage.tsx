@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 import { AuthCard } from '../components/AuthCard'
 import { Countdown } from '../components/Countdown'
 import { MixtapeCase } from '../components/MixtapeCase'
+import { SeasonUnavailable } from '../components/SeasonUnavailable'
 import { StreakCard } from '../components/streak/StreakCard'
 import { StreakFlame } from '../components/streak/StreakFlame'
 import { useAuth } from '../context/AuthContext'
@@ -306,7 +307,12 @@ function HowItWorks() {
 
 export function HomePage() {
   const { user } = useAuth()
-  const { status, loading: playlistLoading } = usePlaylist()
+  const {
+    status,
+    loading: playlistLoading,
+    error: playlistError,
+    refresh: refreshPlaylist,
+  } = usePlaylist()
   const [personal, setPersonal] = useState<PersonalSummary | null>(null)
   const [personalLoading, setPersonalLoading] = useState(false)
 
@@ -415,6 +421,18 @@ export function HomePage() {
       controller.abort()
     }
   }, [user])
+
+  if (!playlistLoading && !status && playlistError) {
+    return (
+      <main className="flex-1 px-4 py-10 sm:px-6 lg:px-8">
+        <SeasonUnavailable
+          error={playlistError}
+          onRetry={refreshPlaylist}
+          title="The room is temporarily unavailable."
+        />
+      </main>
+    )
+  }
 
   return (
     <main className="flex-1">

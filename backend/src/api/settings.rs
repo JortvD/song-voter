@@ -27,12 +27,10 @@ pub struct UpdateSettingsRequest {
 /// Read the app-wide daily streak goal. Unknown or malformed values fall back
 /// to 3 and are clamped to the supported range.
 pub async fn daily_streak_goal(connection: &mut PgConnection) -> Result<i64, ApiError> {
-    let value = sqlx::query_scalar::<_, String>(
-        "SELECT value FROM app_settings WHERE key = $1",
-    )
-    .bind(DAILY_STREAK_GOAL_KEY)
-    .fetch_optional(&mut *connection)
-    .await?;
+    let value = sqlx::query_scalar::<_, String>("SELECT value FROM app_settings WHERE key = $1")
+        .bind(DAILY_STREAK_GOAL_KEY)
+        .fetch_optional(&mut *connection)
+        .await?;
 
     let goal = value
         .and_then(|value| value.parse::<i64>().ok())
@@ -46,7 +44,7 @@ pub async fn get_settings(
     _admin: AdminUser,
 ) -> Result<Json<AdminSettingsResponse>, ApiError> {
     let mut connection = state.db.acquire().await?;
-    let goal = daily_streak_goal(&mut *connection).await?;
+    let goal = daily_streak_goal(&mut connection).await?;
 
     Ok(Json(AdminSettingsResponse {
         daily_streak_goal: goal,
@@ -60,9 +58,7 @@ pub async fn update_settings(
     admin: AdminUser,
     Json(payload): Json<UpdateSettingsRequest>,
 ) -> Result<Json<AdminSettingsResponse>, ApiError> {
-    if !(MIN_DAILY_STREAK_GOAL..=MAX_DAILY_STREAK_GOAL)
-        .contains(&payload.daily_streak_goal)
-    {
+    if !(MIN_DAILY_STREAK_GOAL..=MAX_DAILY_STREAK_GOAL).contains(&payload.daily_streak_goal) {
         return Err(ApiError::bad_request(format!(
             "daily streak goal must be between {MIN_DAILY_STREAK_GOAL} and {MAX_DAILY_STREAK_GOAL}"
         )));

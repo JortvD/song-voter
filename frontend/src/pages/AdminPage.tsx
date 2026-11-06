@@ -206,7 +206,6 @@ function MissionControl() {
                 description="Destructive actions for the active playlist. Reset picks and Remove playlist keep voters and invites; Full reset also clears them. All keep the Spotify connection."
               />
               <AdminDangerZone
-                key={`danger-${refreshKey}`}
                 onReset={refresh}
                 onRemove={refresh}
                 onOpenPlaylist={() => setSection('playlist')}

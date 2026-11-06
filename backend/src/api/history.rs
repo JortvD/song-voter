@@ -101,9 +101,9 @@ pub async fn list(
     let filter = HistoryFilter::from_query(query.status.as_deref());
 
     let mut connection = state.db.acquire().await?;
-    let counts = history_counts(&mut *connection, user.0.id, playlist.id).await?;
+    let counts = history_counts(&mut connection, user.0.id, playlist.id).await?;
     let duels = fetch_history(
-        &mut *connection,
+        &mut connection,
         user.0.id,
         playlist.id,
         filter,
