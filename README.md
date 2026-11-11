@@ -309,9 +309,13 @@ snapshots, other voters' picks on the same tracks remain intact.
   date. Artist and album stats respond to every filter.
 - The liner notes show the most divisive and highest-rated albums, artists and
   decades, one-hit wonders, biggest upsets, coin-flip songs, the most
-  argued-about duel, and a tape-at-a-glance summary. Cards are omitted until
-  their minimum sample is met. `GET /api/chart/stories` exposes the same data and
-  leaderboards.
+  argued-about duel, and a tape-at-a-glance summary. “Divisive” is the mean
+  absolute deviation of an album/artist/decade's rated songs from its own
+  average rating. Cards are omitted until their minimum sample is met.
+  `GET /api/chart/stories` exposes the same data and leaderboards. The admin
+  Liner notes additionally include voter-behaviour stories and leaderboards
+  (activity, agreement, decision speed, session length, taste and side lean);
+  these stay admin-only and are not part of the public stories response.
 - Decade stats come from Spotify release dates. Genres are Spotify artist genres
   mapped to a stable broad set; if Spotify rejects or omits the artist lookup, the
   backfill still completes, keeps all release/album metadata, and leaves genres
