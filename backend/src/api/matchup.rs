@@ -4,6 +4,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::api::history::{recent_picked, DuelHistoryItem, RECENT_DUEL_LIMIT};
+use crate::api::settings::rank_weighting_enabled;
 use crate::api::streak::{load_streak, StreakQuery, StreakSummary};
 use crate::auth::AuthUser;
 use crate::db::{active_playlist, user_progress, voting_block_reason};
@@ -19,6 +20,16 @@ const CANDIDATE_POOL: i64 = 40;
 /// the same small group of tracks.
 const CANDIDATE_SAMPLE: i64 = 200;
 const MAX_INSERT_ATTEMPTS: u32 = 3;
+
+/// Strength of the rank weighting: the top-ranked track is treated as if it
+/// had this many times more comparisons than it actually does.
+const RANK_WEIGHT_STRENGTH: f64 = 6.0;
+/// Rank scale in tracks. By this rank the extra weight has decayed to about
+/// 1/e of the strength; roughly a quarter of the ~2,200-track playlist.
+const RANK_WEIGHT_SCALE: f64 = 500.0;
+/// Rank weighting only kicks in once the playlist averages this many
+/// comparisons, so early voting still spreads duels evenly across tracks.
+const RANK_WEIGHT_MIN_AVG_COMPARISONS: f64 = 6.0;
 
 #[derive(Debug, Serialize)]
 pub struct MatchupResponse {
@@ -44,9 +55,13 @@ struct PairRow {
 /// Pick the next pair for the current user.
 ///
 /// Strategy:
-/// 1. Take the 100 least-compared tracks (ties broken by least recently compared).
-/// 2. Among those, prefer the pair with the smallest Elo difference.
-/// 3. Never repeat a pair the user has already seen.
+/// 1. Take the 200 least-compared tracks (ties broken by least recently
+///    compared). Once the playlist averages at least 6 comparisons and rank
+///    weighting is enabled, comparisons are divided by a rank-dependent
+///    weight so higher-rated tracks enter this sample more often.
+/// 2. Randomly narrow that sample to 40 tracks.
+/// 3. Prefer the remaining unseen pair with the smallest Elo difference.
+/// 4. Never repeat a pair the user has already seen.
 pub async fn next(
     State(state): State<AppState>,
     user: AuthUser,
@@ -74,6 +89,11 @@ pub async fn next(
         ));
     }
 
+    let rank_weighting = {
+        let mut connection = state.db.acquire().await?;
+        rank_weighting_enabled(&mut connection).await?
+    };
+
     for attempt in 1..=MAX_INSERT_ATTEMPTS {
         let mut transaction = state.db.begin().await?;
 
@@ -82,6 +102,10 @@ pub async fn next(
             .bind(user.0.id)
             .bind(CANDIDATE_POOL)
             .bind(CANDIDATE_SAMPLE)
+            .bind(rank_weighting)
+            .bind(RANK_WEIGHT_STRENGTH)
+            .bind(RANK_WEIGHT_SCALE)
+            .bind(RANK_WEIGHT_MIN_AVG_COMPARISONS)
             .fetch_optional(&mut *transaction)
             .await?;
 
@@ -186,11 +210,22 @@ pub async fn next(
 }
 
 const PAIR_SQL: &str = r#"
-WITH least_compared AS (
-    SELECT id, rating
+WITH ranked AS (
+    SELECT id, rating, comparisons, last_compared_at,
+           ROW_NUMBER() OVER (ORDER BY rating DESC) - 1 AS rnk,
+           AVG(comparisons) OVER () AS avg_comparisons
     FROM tracks
     WHERE playlist_id = $1
-    ORDER BY comparisons ASC, last_compared_at ASC NULLS LAST
+),
+least_compared AS (
+    SELECT id, rating
+    FROM ranked
+    ORDER BY
+        CASE WHEN $5::bool AND avg_comparisons::float8 >= $8::float8
+             THEN comparisons::float8 / (1 + $6::float8 * exp(-rnk::float8 / $7::float8))
+             ELSE comparisons::float8
+        END ASC,
+        last_compared_at ASC NULLS LAST
     LIMIT $4
 ),
 candidates AS (
