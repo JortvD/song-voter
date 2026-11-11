@@ -14,6 +14,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   decade: 'Decades',
   duel: 'Duels',
   tape: 'Tape',
+  voter: 'Voters',
 }
 
 function categorySticker(category: string): string {
@@ -197,7 +198,7 @@ export function StoryLeaderboards({
 }: {
   leaderboards: StoryLeaderboard[]
 }) {
-  const categories = ['album', 'artist', 'decade', 'duel'].filter((category) =>
+  const categories = ['album', 'artist', 'decade', 'duel', 'voter'].filter((category) =>
     leaderboards.some((board) => board.category === category),
   )
   const [selected, setSelected] = useState('')

@@ -516,6 +516,19 @@ pub async fn flag_summary(
     Ok((flagged_voters, share, counts))
 }
 
+/// All voter metrics for callers that need the whole room at once (the admin
+/// Liner-notes stories). The paginated table has its own search path.
+pub async fn all_voter_stats(
+    pool: &PgPool,
+    playlist_id: Uuid,
+    config: &StatsConfig,
+) -> Result<Vec<VoterStat>, ApiError> {
+    let users = load_users(pool, "").await?;
+    let observations = load_observations(pool, playlist_id, None).await?;
+    let ratings = load_ratings(pool, playlist_id).await?;
+    Ok(compute_voter_stats(&users, &observations, &ratings, config))
+}
+
 pub async fn voters(
     State(state): State<AppState>,
     _admin: AdminUser,

@@ -13,11 +13,16 @@ use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::api::admin_voters::{all_voter_stats, VoterStat};
+use crate::api::settings::stats_config;
 use crate::auth::AdminUser;
 use crate::db::active_playlist;
 use crate::error::ApiError;
 use crate::models::{MatchupTrack, Playlist};
 use crate::state::AppState;
+
+/// Voter stories need a little history before a superlative is meaningful.
+const VOTER_STORY_MIN_VOTES: i64 = 20;
 
 #[derive(Debug, Serialize)]
 pub struct ChartStories {
@@ -83,7 +88,7 @@ pub struct StoryStat {
     pub value: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct StoryTrack {
     pub role: &'static str,
     pub id: Uuid,
@@ -161,17 +166,16 @@ struct AlbumStats {
     image_url: Option<String>,
     song_count: i64,
     avg_rating: f64,
-    best_rating: f64,
-    worst_rating: f64,
     best_id: Uuid,
     worst_id: Uuid,
     comparisons: i64,
     wins: i64,
+    ratings: Vec<f64>,
 }
 
 impl AlbumStats {
-    fn spread(&self) -> f64 {
-        self.best_rating - self.worst_rating
+    fn mad(&self) -> f64 {
+        mean_absolute_deviation(&self.ratings)
     }
 }
 
@@ -182,16 +186,16 @@ struct ArtistStats {
     song_count: i64,
     avg_rating: f64,
     best_rating: f64,
-    worst_rating: f64,
     best_id: Uuid,
     worst_id: Uuid,
     comparisons: i64,
     wins: i64,
+    ratings: Vec<f64>,
 }
 
 impl ArtistStats {
-    fn spread(&self) -> f64 {
-        self.best_rating - self.worst_rating
+    fn mad(&self) -> f64 {
+        mean_absolute_deviation(&self.ratings)
     }
 
     fn one_hit_gap(&self) -> f64 {
@@ -205,17 +209,16 @@ struct DecadeStats {
     image_url: Option<String>,
     song_count: i64,
     avg_rating: f64,
-    best_rating: f64,
-    worst_rating: f64,
     best_id: Uuid,
     worst_id: Uuid,
     comparisons: i64,
     wins: i64,
+    ratings: Vec<f64>,
 }
 
 impl DecadeStats {
-    fn spread(&self) -> f64 {
-        self.best_rating - self.worst_rating
+    fn mad(&self) -> f64 {
+        mean_absolute_deviation(&self.ratings)
     }
 }
 
@@ -290,7 +293,7 @@ pub async fn public(State(state): State<AppState>) -> Result<Json<Value>, ApiErr
                 ApiError::service_unavailable("the server is busy; please try again")
             })?;
 
-            let stories = load_stories(&state.db, &playlist, true).await?;
+            let stories = load_stories(&state.db, &playlist, true, true).await?;
             serde_json::to_value(stories).map_err(ApiError::internal)
         })
         .await?;
@@ -315,13 +318,14 @@ pub async fn admin(
         .await
         .map_err(|_| ApiError::service_unavailable("the server is busy; please try again"))?;
 
-    Ok(Json(load_stories(&state.db, &playlist, true).await?))
+    Ok(Json(load_stories(&state.db, &playlist, true, true).await?))
 }
 
 pub async fn load_stories(
     pool: &PgPool,
     playlist: &Playlist,
     include_leaderboards: bool,
+    include_voter_stories: bool,
 ) -> Result<ChartStories, ApiError> {
     let most_duelled = sqlx::query_as::<_, StoryTrackRow>(
         "SELECT id, spotify_id, title, artists, album, album_image_url, preview_url, \
@@ -350,9 +354,9 @@ pub async fn load_stories(
     .fetch_optional(pool)
     .await?;
 
-    let cards = load_story_cards(pool, playlist).await?;
+    let cards = load_story_cards(pool, playlist, include_voter_stories).await?;
     let leaderboards = if include_leaderboards {
-        load_leaderboards(pool, playlist.id).await?
+        load_leaderboards(pool, playlist.id, include_voter_stories).await?
     } else {
         Vec::new()
     };
@@ -380,7 +384,11 @@ pub async fn load_stories(
     })
 }
 
-async fn load_story_cards(pool: &PgPool, playlist: &Playlist) -> Result<Vec<StoryCard>, ApiError> {
+async fn load_story_cards(
+    pool: &PgPool,
+    playlist: &Playlist,
+    include_voter_stories: bool,
+) -> Result<Vec<StoryCard>, ApiError> {
     let album_rows = load_album_stats(pool, playlist.id).await?;
     let artist_rows = load_artist_stats(pool, playlist.id).await?;
     let decade_rows = load_decade_stats(pool, playlist.id).await?;
@@ -455,12 +463,12 @@ async fn load_story_cards(pool: &PgPool, playlist: &Playlist) -> Result<Vec<Stor
                 format_count(row.song_count)
             )),
             body: format!(
-                "Its best and worst songs are {} points apart.",
-                format_score(row.spread())
+                "Its rated songs sit {} rating points from the album average, on average.",
+                format_deviation(row.mad())
             ),
             image_url: row.image_url.clone(),
             stats: vec![
-                stat("Spread", format_score(row.spread())),
+                stat("Mean deviation", format_deviation(row.mad())),
                 stat("Rated songs", format_count(row.song_count)),
             ],
             tracks: two_tracks(&featured, row.best_id, row.worst_id, "best", "worst"),
@@ -501,12 +509,12 @@ async fn load_story_cards(pool: &PgPool, playlist: &Playlist) -> Result<Vec<Stor
             title: row.name.clone(),
             subtitle: Some(format!("{} rated songs", format_count(row.song_count))),
             body: format!(
-                "A {} point gap between their best and worst song.",
-                format_score(row.spread())
+                "Their rated songs sit {} rating points from the artist average, on average.",
+                format_deviation(row.mad())
             ),
             image_url: row.image_url.clone(),
             stats: vec![
-                stat("Spread", format_score(row.spread())),
+                stat("Mean deviation", format_deviation(row.mad())),
                 stat("Rated songs", format_count(row.song_count)),
             ],
             tracks: two_tracks(&featured, row.best_id, row.worst_id, "best", "worst"),
@@ -587,12 +595,12 @@ async fn load_story_cards(pool: &PgPool, playlist: &Playlist) -> Result<Vec<Stor
             title: format!("The {}s", row.decade),
             subtitle: Some(format!("{} rated songs", format_count(row.song_count))),
             body: format!(
-                "A {} point gap between its best and worst song.",
-                format_score(row.spread())
+                "Its rated songs sit {} rating points from the decade average, on average.",
+                format_deviation(row.mad())
             ),
             image_url: row.image_url.clone(),
             stats: vec![
-                stat("Spread", format_score(row.spread())),
+                stat("Mean deviation", format_deviation(row.mad())),
                 stat("Rated songs", format_count(row.song_count)),
             ],
             tracks: two_tracks(&featured, row.best_id, row.worst_id, "best", "worst"),
@@ -761,12 +769,645 @@ async fn load_story_cards(pool: &PgPool, playlist: &Playlist) -> Result<Vec<Stor
         });
     }
 
+    if include_voter_stories {
+        cards.extend(load_voter_story_cards(pool, playlist.id).await?);
+    }
+
     Ok(cards)
+}
+
+/// Stories about the people doing the voting. They are included on the admin
+/// dashboard immediately and on the public Stats page once The Reveal is open
+/// (the public stories endpoint itself is reveal-gated).
+async fn load_voter_story_cards(
+    pool: &PgPool,
+    playlist_id: Uuid,
+) -> Result<Vec<StoryCard>, ApiError> {
+    let mut connection = pool.acquire().await?;
+    let config = stats_config(&mut connection).await?;
+    drop(connection);
+
+    let stats = all_voter_stats(pool, playlist_id, &config).await?;
+    let eligible: Vec<&VoterStat> = stats
+        .iter()
+        .filter(|voter| voter.votes >= VOTER_STORY_MIN_VOTES && voter.duels > 0)
+        .collect();
+
+    if eligible.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let voter_ids = eligible.iter().map(|voter| voter.id).collect::<Vec<_>>();
+    let signatures = load_signature_tracks(pool, playlist_id, &voter_ids).await?;
+    let mut cards = Vec::new();
+
+    if let Some(voter) = eligible.iter().copied().max_by(|a, b| {
+        a.votes
+            .cmp(&b.votes)
+            .then_with(|| a.sessions.cmp(&b.sessions))
+            .then_with(|| b.username.cmp(&a.username))
+    }) {
+        cards.push(voter_card(
+            "voter-most-active",
+            "Most active voter",
+            voter,
+            format!(
+                "Cast {} votes across {} sessions and {} duels.",
+                format_count(voter.votes),
+                format_count(voter.sessions),
+                format_count(voter.duels)
+            ),
+            vec![
+                stat("Votes", format_count(voter.votes)),
+                stat("Sessions", format_count(voter.sessions)),
+                stat("Agreement", format_percent(voter.agreement_pct)),
+                stat("Median", format_decision(voter.median_decision_seconds)),
+            ],
+            signature_for(&signatures, voter),
+        ));
+    }
+
+    if let Some(voter) = eligible
+        .iter()
+        .copied()
+        .filter(|voter| voter.agreement_pct.is_some())
+        .max_by(|a, b| {
+            a.agreement_pct
+                .partial_cmp(&b.agreement_pct)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| a.votes.cmp(&b.votes))
+                .then_with(|| b.username.cmp(&a.username))
+        })
+    {
+        cards.push(voter_card(
+            "voter-most-agreement",
+            "The crowd's North Star",
+            voter,
+            format!(
+                "Picked the currently higher-rated song {} of the time.",
+                format_percent(voter.agreement_pct)
+            ),
+            vec![
+                stat("Agreement", format_percent(voter.agreement_pct)),
+                stat("Votes", format_count(voter.votes)),
+                stat("Median", format_decision(voter.median_decision_seconds)),
+            ],
+            signature_for(&signatures, voter),
+        ));
+    }
+
+    if let Some(voter) = eligible
+        .iter()
+        .copied()
+        .filter(|voter| voter.agreement_pct.is_some())
+        .min_by(|a, b| {
+            a.agreement_pct
+                .partial_cmp(&b.agreement_pct)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| b.votes.cmp(&a.votes))
+                .then_with(|| a.username.cmp(&b.username))
+        })
+    {
+        cards.push(voter_card(
+            "voter-most-contrarian",
+            "Against the grain",
+            voter,
+            format!(
+                "Picked the currently higher-rated song only {} of the time.",
+                format_percent(voter.agreement_pct)
+            ),
+            vec![
+                stat("Agreement", format_percent(voter.agreement_pct)),
+                stat("Votes", format_count(voter.votes)),
+                stat("Median", format_decision(voter.median_decision_seconds)),
+            ],
+            signature_for(&signatures, voter),
+        ));
+    }
+
+    if let Some(voter) = eligible
+        .iter()
+        .copied()
+        .filter(|voter| voter.median_decision_seconds.is_some())
+        .min_by(|a, b| {
+            a.median_decision_seconds
+                .partial_cmp(&b.median_decision_seconds)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| b.votes.cmp(&a.votes))
+                .then_with(|| a.username.cmp(&b.username))
+        })
+    {
+        cards.push(voter_card(
+            "voter-fastest",
+            "Quickest thumb",
+            voter,
+            format!(
+                "Median decision {} across {} votes.",
+                format_decision(voter.median_decision_seconds),
+                format_count(voter.votes)
+            ),
+            vec![
+                stat("Median", format_decision(voter.median_decision_seconds)),
+                stat("P10", format_decision(voter.p10_decision_seconds)),
+                stat("Votes", format_count(voter.votes)),
+            ],
+            signature_for(&signatures, voter),
+        ));
+    }
+
+    if let Some(voter) = eligible
+        .iter()
+        .copied()
+        .filter(|voter| voter.median_decision_seconds.is_some())
+        .max_by(|a, b| {
+            a.median_decision_seconds
+                .partial_cmp(&b.median_decision_seconds)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| a.votes.cmp(&b.votes))
+                .then_with(|| b.username.cmp(&a.username))
+        })
+    {
+        cards.push(voter_card(
+            "voter-slowest",
+            "Deep listener",
+            voter,
+            format!(
+                "Takes a median of {} to decide, across {} votes.",
+                format_decision(voter.median_decision_seconds),
+                format_count(voter.votes)
+            ),
+            vec![
+                stat("Median", format_decision(voter.median_decision_seconds)),
+                stat("P90", format_decision(voter.p90_decision_seconds)),
+                stat("Votes", format_count(voter.votes)),
+            ],
+            signature_for(&signatures, voter),
+        ));
+    }
+
+    if let Some(voter) = eligible.iter().copied().max_by(|a, b| {
+        a.avg_duels_per_session
+            .total_cmp(&b.avg_duels_per_session)
+            .then_with(|| a.sessions.cmp(&b.sessions))
+            .then_with(|| b.username.cmp(&a.username))
+    }) {
+        cards.push(voter_card(
+            "voter-longest-session",
+            "Marathon session",
+            voter,
+            format!(
+                "Averages {:.1} duels per session across {} sessions.",
+                voter.avg_duels_per_session,
+                format_count(voter.sessions)
+            ),
+            vec![
+                stat(
+                    "Duels / session",
+                    format!("{:.1}", voter.avg_duels_per_session),
+                ),
+                stat("Sessions", format_count(voter.sessions)),
+                stat(
+                    "Total time",
+                    format_duration_seconds(voter.total_voting_time_seconds),
+                ),
+            ],
+            signature_for(&signatures, voter),
+        ));
+    }
+
+    if let Some(voter) = eligible.iter().copied().max_by(|a, b| {
+        a.distinct_songs_seen
+            .cmp(&b.distinct_songs_seen)
+            .then_with(|| a.votes.cmp(&b.votes))
+            .then_with(|| b.username.cmp(&a.username))
+    }) {
+        cards.push(voter_card(
+            "voter-widest-taste",
+            "Widest taste",
+            voter,
+            format!(
+                "Has seen {} distinct songs across {} duels.",
+                format_count(voter.distinct_songs_seen),
+                format_count(voter.duels)
+            ),
+            vec![
+                stat("Songs seen", format_count(voter.distinct_songs_seen)),
+                stat("Votes", format_count(voter.votes)),
+                stat("Sessions", format_count(voter.sessions)),
+            ],
+            signature_for(&signatures, voter),
+        ));
+    }
+
+    if let Some(voter) = eligible
+        .iter()
+        .copied()
+        .filter(|voter| voter.side_bias_pct.is_some())
+        .max_by(|a, b| {
+            a.side_bias_pct
+                .partial_cmp(&b.side_bias_pct)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| a.votes.cmp(&b.votes))
+                .then_with(|| b.username.cmp(&a.username))
+        })
+    {
+        cards.push(voter_card(
+            "voter-left-lean",
+            "Leaning left",
+            voter,
+            format!(
+                "Made {} of their picks on Side A.",
+                format_percent(voter.side_bias_pct)
+            ),
+            vec![
+                stat("Side A", format_percent(voter.side_bias_pct)),
+                stat("Votes", format_count(voter.votes)),
+                stat("Agreement", format_percent(voter.agreement_pct)),
+            ],
+            signature_for(&signatures, voter),
+        ));
+    }
+
+    if let Some(voter) = eligible.iter().copied().max_by(|a, b| {
+        a.total_voting_time_seconds
+            .total_cmp(&b.total_voting_time_seconds)
+            .then_with(|| a.sessions.cmp(&b.sessions))
+            .then_with(|| b.username.cmp(&a.username))
+    }) {
+        cards.push(voter_card(
+            "voter-most-time",
+            "Most time in the room",
+            voter,
+            format!(
+                "Spent {} in voting sessions across {} sessions.",
+                format_duration_seconds(voter.total_voting_time_seconds),
+                format_count(voter.sessions)
+            ),
+            vec![
+                stat(
+                    "Voting time",
+                    format_duration_seconds(voter.total_voting_time_seconds),
+                ),
+                stat("Sessions", format_count(voter.sessions)),
+                stat("Votes", format_count(voter.votes)),
+            ],
+            signature_for(&signatures, voter),
+        ));
+    }
+
+    let decisions = eligible
+        .iter()
+        .filter_map(|voter| voter.median_decision_seconds)
+        .collect::<Vec<_>>();
+    let agreements = eligible
+        .iter()
+        .filter_map(|voter| voter.agreement_pct)
+        .collect::<Vec<_>>();
+    let sessions = eligible
+        .iter()
+        .map(|voter| voter.sessions as f64)
+        .collect::<Vec<_>>();
+    let per_session = eligible
+        .iter()
+        .map(|voter| voter.avg_duels_per_session)
+        .collect::<Vec<_>>();
+
+    if let (Some(median_decision), Some(median_agreement)) = (
+        crate::api::analytics::median(&decisions),
+        crate::api::analytics::median(&agreements),
+    ) {
+        cards.push(StoryCard {
+            id: "voter-crowd",
+            category: "voter",
+            eyebrow: "The room's habits",
+            title: "How the room votes".to_string(),
+            subtitle: Some(format!(
+                "{} voters with at least {} votes",
+                format_count(eligible.len() as i64),
+                format_count(VOTER_STORY_MIN_VOTES)
+            )),
+            body: format!(
+                "The median voter decides in {} and agrees with the current standings {} of the time.",
+                format_decision(Some(median_decision)),
+                format_percent(Some(median_agreement))
+            ),
+            image_url: None,
+            stats: vec![
+                stat("Median decision", format_decision(Some(median_decision))),
+                stat("Median agreement", format_percent(Some(median_agreement))),
+                stat(
+                    "Median sessions",
+                    format_count(crate::api::analytics::median(&sessions).unwrap_or(0.0).round() as i64),
+                ),
+                stat(
+                    "Duels / session",
+                    format!(
+                        "{:.1}",
+                        crate::api::analytics::median(&per_session).unwrap_or(0.0)
+                    ),
+                ),
+            ],
+            tracks: Vec::new(),
+        });
+    }
+
+    Ok(cards)
+}
+
+fn voter_card(
+    id: &'static str,
+    eyebrow: &'static str,
+    voter: &VoterStat,
+    body: String,
+    stats: Vec<StoryStat>,
+    tracks: Vec<StoryTrack>,
+) -> StoryCard {
+    StoryCard {
+        id,
+        category: "voter",
+        eyebrow,
+        title: voter.username.clone(),
+        subtitle: Some(format!(
+            "{} votes · {} sessions",
+            format_count(voter.votes),
+            format_count(voter.sessions)
+        )),
+        body,
+        image_url: None,
+        stats,
+        tracks,
+    }
+}
+
+fn signature_for(signatures: &HashMap<Uuid, StoryTrack>, voter: &VoterStat) -> Vec<StoryTrack> {
+    signatures
+        .get(&voter.id)
+        .cloned()
+        .map(|track| vec![track])
+        .unwrap_or_default()
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct SignatureRow {
+    user_id: Uuid,
+    id: Uuid,
+    title: String,
+    artists: String,
+    album: Option<String>,
+    album_image_url: Option<String>,
+    rating: f64,
+}
+
+async fn load_signature_tracks(
+    pool: &PgPool,
+    playlist_id: Uuid,
+    user_ids: &[Uuid],
+) -> Result<HashMap<Uuid, StoryTrack>, ApiError> {
+    if user_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let rows = sqlx::query_as::<_, SignatureRow>(
+        "WITH picks AS ( \
+             SELECT v.user_id, t.id, t.title, t.artists, t.album, t.album_image_url, t.rating, \
+                    ROW_NUMBER() OVER ( \
+                        PARTITION BY v.user_id \
+                        ORDER BY COUNT(*) DESC, MAX(v.created_at) DESC \
+                    ) AS rank \
+             FROM votes v \
+             JOIN tracks t ON t.id = v.winner \
+             WHERE v.playlist_id = $1 AND v.user_id = ANY($2) \
+             GROUP BY v.user_id, t.id, t.title, t.artists, t.album, t.album_image_url, t.rating \
+         ) \
+         SELECT user_id, id, title, artists, album, album_image_url, rating \
+         FROM picks WHERE rank = 1",
+    )
+    .bind(playlist_id)
+    .bind(user_ids)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            (
+                row.user_id,
+                StoryTrack {
+                    role: "signature pick",
+                    id: row.id,
+                    title: row.title,
+                    artists: row.artists,
+                    album: row.album,
+                    album_image_url: row.album_image_url,
+                    rating: row.rating,
+                },
+            )
+        })
+        .collect())
+}
+
+async fn load_voter_leaderboards(
+    pool: &PgPool,
+    playlist_id: Uuid,
+) -> Result<Vec<StoryLeaderboard>, ApiError> {
+    let mut connection = pool.acquire().await?;
+    let config = stats_config(&mut connection).await?;
+    drop(connection);
+
+    let stats = all_voter_stats(pool, playlist_id, &config).await?;
+    let eligible: Vec<&VoterStat> = stats
+        .iter()
+        .filter(|voter| voter.votes >= VOTER_STORY_MIN_VOTES && voter.duels > 0)
+        .collect();
+    if eligible.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut boards = Vec::new();
+
+    let mut active = eligible.clone();
+    active.sort_by(|a, b| {
+        b.votes
+            .cmp(&a.votes)
+            .then_with(|| b.sessions.cmp(&a.sessions))
+            .then_with(|| a.username.cmp(&b.username))
+    });
+    boards.push(StoryLeaderboard {
+        id: "most-active-voters",
+        category: "voter",
+        title: "Most active voters",
+        metric_label: "Votes",
+        detail_label: "Sessions",
+        rows: leaderboard_rows(
+            &active,
+            |row| row.username.clone(),
+            |row| Some(format!("{} duels", format_count(row.duels))),
+            |_| None,
+            |row| format_count(row.votes),
+            |row| format_count(row.sessions),
+        ),
+    });
+
+    let mut agreement = eligible
+        .iter()
+        .copied()
+        .filter(|voter| voter.agreement_pct.is_some())
+        .collect::<Vec<_>>();
+    agreement.sort_by(|a, b| {
+        b.agreement_pct
+            .partial_cmp(&a.agreement_pct)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| b.votes.cmp(&a.votes))
+            .then_with(|| a.username.cmp(&b.username))
+    });
+    boards.push(StoryLeaderboard {
+        id: "voter-agreement",
+        category: "voter",
+        title: "Most agreement with the crowd",
+        metric_label: "Agreement",
+        detail_label: "Votes",
+        rows: leaderboard_rows(
+            &agreement,
+            |row| row.username.clone(),
+            |_| None,
+            |_| None,
+            |row| format_percent(row.agreement_pct),
+            |row| format_count(row.votes),
+        ),
+    });
+
+    let mut quickest = eligible
+        .iter()
+        .copied()
+        .filter(|voter| voter.median_decision_seconds.is_some())
+        .collect::<Vec<_>>();
+    quickest.sort_by(|a, b| {
+        a.median_decision_seconds
+            .partial_cmp(&b.median_decision_seconds)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| b.votes.cmp(&a.votes))
+            .then_with(|| a.username.cmp(&b.username))
+    });
+    boards.push(StoryLeaderboard {
+        id: "quickest-voters",
+        category: "voter",
+        title: "Quickest decisions",
+        metric_label: "Median",
+        detail_label: "Votes",
+        rows: leaderboard_rows(
+            &quickest,
+            |row| row.username.clone(),
+            |_| None,
+            |_| None,
+            |row| format_decision(row.median_decision_seconds),
+            |row| format_count(row.votes),
+        ),
+    });
+
+    let mut longest = eligible.clone();
+    longest.sort_by(|a, b| {
+        b.avg_duels_per_session
+            .total_cmp(&a.avg_duels_per_session)
+            .then_with(|| b.sessions.cmp(&a.sessions))
+            .then_with(|| a.username.cmp(&b.username))
+    });
+    boards.push(StoryLeaderboard {
+        id: "longest-voter-sessions",
+        category: "voter",
+        title: "Longest average sessions",
+        metric_label: "Duels / session",
+        detail_label: "Sessions",
+        rows: leaderboard_rows(
+            &longest,
+            |row| row.username.clone(),
+            |_| None,
+            |_| None,
+            |row| format!("{:.1}", row.avg_duels_per_session),
+            |row| format_count(row.sessions),
+        ),
+    });
+
+    let mut taste = eligible.clone();
+    taste.sort_by(|a, b| {
+        b.distinct_songs_seen
+            .cmp(&a.distinct_songs_seen)
+            .then_with(|| b.votes.cmp(&a.votes))
+            .then_with(|| a.username.cmp(&b.username))
+    });
+    boards.push(StoryLeaderboard {
+        id: "widest-voter-taste",
+        category: "voter",
+        title: "Widest taste",
+        metric_label: "Songs seen",
+        detail_label: "Votes",
+        rows: leaderboard_rows(
+            &taste,
+            |row| row.username.clone(),
+            |_| None,
+            |_| None,
+            |row| format_count(row.distinct_songs_seen),
+            |row| format_count(row.votes),
+        ),
+    });
+
+    let mut timing = eligible.clone();
+    timing.sort_by(|a, b| {
+        b.total_voting_time_seconds
+            .total_cmp(&a.total_voting_time_seconds)
+            .then_with(|| b.sessions.cmp(&a.sessions))
+            .then_with(|| a.username.cmp(&b.username))
+    });
+    boards.push(StoryLeaderboard {
+        id: "most-voter-time",
+        category: "voter",
+        title: "Most time in the room",
+        metric_label: "Voting time",
+        detail_label: "Sessions",
+        rows: leaderboard_rows(
+            &timing,
+            |row| row.username.clone(),
+            |_| None,
+            |_| None,
+            |row| format_duration_seconds(row.total_voting_time_seconds),
+            |row| format_count(row.sessions),
+        ),
+    });
+
+    let mut lean = eligible
+        .iter()
+        .copied()
+        .filter(|voter| voter.side_bias_pct.is_some())
+        .collect::<Vec<_>>();
+    lean.sort_by(|a, b| {
+        b.side_bias_pct
+            .partial_cmp(&a.side_bias_pct)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| b.votes.cmp(&a.votes))
+            .then_with(|| a.username.cmp(&b.username))
+    });
+    boards.push(StoryLeaderboard {
+        id: "voter-side-lean",
+        category: "voter",
+        title: "Most left-leaning voters",
+        metric_label: "Side A",
+        detail_label: "Votes",
+        rows: leaderboard_rows(
+            &lean,
+            |row| row.username.clone(),
+            |_| None,
+            |_| None,
+            |row| format_percent(row.side_bias_pct),
+            |row| format_count(row.votes),
+        ),
+    });
+
+    Ok(boards)
 }
 
 async fn load_leaderboards(
     pool: &PgPool,
     playlist_id: Uuid,
+    include_voter_stories: bool,
 ) -> Result<Vec<StoryLeaderboard>, ApiError> {
     let album_rows = load_album_stats(pool, playlist_id).await?;
     let artist_rows = load_artist_stats(pool, playlist_id).await?;
@@ -782,8 +1423,8 @@ async fn load_leaderboards(
         .filter(|row| row.song_count >= 2)
         .collect();
     divisive_albums.sort_by(|a, b| {
-        b.spread()
-            .partial_cmp(&a.spread())
+        b.mad()
+            .partial_cmp(&a.mad())
             .unwrap_or(Ordering::Equal)
             .then_with(|| b.song_count.cmp(&a.song_count))
             .then_with(|| a.name.cmp(&b.name))
@@ -792,14 +1433,14 @@ async fn load_leaderboards(
         id: "divisive-albums",
         category: "album",
         title: "Most divisive albums",
-        metric_label: "Spread",
+        metric_label: "Mean deviation",
         detail_label: "Songs",
         rows: leaderboard_rows(
             &divisive_albums,
             |row| row.name.clone(),
             |row| row.artists.clone(),
             |row| row.image_url.clone(),
-            |row| format_score(row.spread()),
+            |row| format_deviation(row.mad()),
             |row| format_count(row.song_count),
         ),
     });
@@ -837,8 +1478,8 @@ async fn load_leaderboards(
         .filter(|row| row.song_count >= 3)
         .collect();
     divisive_artists.sort_by(|a, b| {
-        b.spread()
-            .partial_cmp(&a.spread())
+        b.mad()
+            .partial_cmp(&a.mad())
             .unwrap_or(Ordering::Equal)
             .then_with(|| b.song_count.cmp(&a.song_count))
             .then_with(|| a.name.cmp(&b.name))
@@ -847,14 +1488,14 @@ async fn load_leaderboards(
         id: "divisive-artists",
         category: "artist",
         title: "Most divisive artists",
-        metric_label: "Spread",
+        metric_label: "Mean deviation",
         detail_label: "Songs",
         rows: leaderboard_rows(
             &divisive_artists,
             |row| row.name.clone(),
             |_| None,
             |row| row.image_url.clone(),
-            |row| format_score(row.spread()),
+            |row| format_deviation(row.mad()),
             |row| format_count(row.song_count),
         ),
     });
@@ -951,8 +1592,8 @@ async fn load_leaderboards(
         .filter(|row| row.song_count >= 5)
         .collect();
     divisive_decades.sort_by(|a, b| {
-        b.spread()
-            .partial_cmp(&a.spread())
+        b.mad()
+            .partial_cmp(&a.mad())
             .unwrap_or(Ordering::Equal)
             .then_with(|| b.song_count.cmp(&a.song_count))
             .then_with(|| b.decade.cmp(&a.decade))
@@ -961,14 +1602,14 @@ async fn load_leaderboards(
         id: "divisive-decades",
         category: "decade",
         title: "Most divisive decades",
-        metric_label: "Spread",
+        metric_label: "Mean deviation",
         detail_label: "Songs",
         rows: leaderboard_rows(
             &divisive_decades,
             |row| format!("The {}s", row.decade),
             |_| None,
             |row| row.image_url.clone(),
-            |row| format_score(row.spread()),
+            |row| format_deviation(row.mad()),
             |row| format_count(row.song_count),
         ),
     });
@@ -1059,6 +1700,10 @@ async fn load_leaderboards(
         rows: pair_rows,
     });
 
+    if include_voter_stories {
+        leaderboards.extend(load_voter_leaderboards(pool, playlist_id).await?);
+    }
+
     leaderboards.retain(|board| !board.rows.is_empty());
 
     Ok(leaderboards)
@@ -1097,12 +1742,11 @@ async fn load_album_stats(
                     FILTER (WHERE t.album_image_url IS NOT NULL))[1] AS image_url, \
                 COUNT(*)::bigint AS song_count, \
                 AVG(t.rating)::float8 AS avg_rating, \
-                MAX(t.rating)::float8 AS best_rating, \
-                MIN(t.rating)::float8 AS worst_rating, \
                 (array_agg(t.id ORDER BY t.rating DESC))[1] AS best_id, \
                 (array_agg(t.id ORDER BY t.rating ASC))[1] AS worst_id, \
                 COALESCE(SUM(t.comparisons), 0)::bigint AS comparisons, \
-                COALESCE(SUM(t.wins), 0)::bigint AS wins \
+                COALESCE(SUM(t.wins), 0)::bigint AS wins, \
+                array_agg(t.rating) AS ratings \
          FROM tracks t \
          WHERE t.playlist_id = $1 AND t.album_id IS NOT NULL AND t.comparisons > 0 \
          GROUP BY t.album_id",
@@ -1123,11 +1767,11 @@ async fn load_artist_stats(
                 COUNT(*)::bigint AS song_count, \
                 AVG(t.rating)::float8 AS avg_rating, \
                 MAX(t.rating)::float8 AS best_rating, \
-                MIN(t.rating)::float8 AS worst_rating, \
                 (array_agg(t.id ORDER BY t.rating DESC))[1] AS best_id, \
                 (array_agg(t.id ORDER BY t.rating ASC))[1] AS worst_id, \
                 COALESCE(SUM(t.comparisons), 0)::bigint AS comparisons, \
-                COALESCE(SUM(t.wins), 0)::bigint AS wins \
+                COALESCE(SUM(t.wins), 0)::bigint AS wins, \
+                array_agg(t.rating) AS ratings \
          FROM track_artists ta \
          JOIN artists a ON a.id = ta.artist_id \
          JOIN tracks t ON t.id = ta.track_id \
@@ -1149,12 +1793,11 @@ async fn load_decade_stats(
                     FILTER (WHERE t.album_image_url IS NOT NULL))[1] AS image_url, \
                 COUNT(*)::bigint AS song_count, \
                 AVG(t.rating)::float8 AS avg_rating, \
-                MAX(t.rating)::float8 AS best_rating, \
-                MIN(t.rating)::float8 AS worst_rating, \
                 (array_agg(t.id ORDER BY t.rating DESC))[1] AS best_id, \
                 (array_agg(t.id ORDER BY t.rating ASC))[1] AS worst_id, \
                 COALESCE(SUM(t.comparisons), 0)::bigint AS comparisons, \
-                COALESCE(SUM(t.wins), 0)::bigint AS wins \
+                COALESCE(SUM(t.wins), 0)::bigint AS wins, \
+                array_agg(t.rating) AS ratings \
          FROM tracks t \
          WHERE t.playlist_id = $1 AND t.decade IS NOT NULL AND t.comparisons > 0 \
          GROUP BY t.decade",
@@ -1289,8 +1932,8 @@ fn most_divisive_album(rows: &[AlbumStats]) -> Option<&AlbumStats> {
     rows.iter()
         .filter(|row| row.song_count >= 2)
         .max_by(|a, b| {
-            a.spread()
-                .partial_cmp(&b.spread())
+            a.mad()
+                .partial_cmp(&b.mad())
                 .unwrap_or(Ordering::Equal)
                 .then_with(|| a.song_count.cmp(&b.song_count))
                 .then_with(|| b.name.cmp(&a.name))
@@ -1314,8 +1957,8 @@ fn most_divisive_artist(rows: &[ArtistStats]) -> Option<&ArtistStats> {
     rows.iter()
         .filter(|row| row.song_count >= 3)
         .max_by(|a, b| {
-            a.spread()
-                .partial_cmp(&b.spread())
+            a.mad()
+                .partial_cmp(&b.mad())
                 .unwrap_or(Ordering::Equal)
                 .then_with(|| a.song_count.cmp(&b.song_count))
                 .then_with(|| b.name.cmp(&a.name))
@@ -1368,8 +2011,8 @@ fn most_divisive_decade(rows: &[DecadeStats]) -> Option<&DecadeStats> {
     rows.iter()
         .filter(|row| row.song_count >= 5)
         .max_by(|a, b| {
-            a.spread()
-                .partial_cmp(&b.spread())
+            a.mad()
+                .partial_cmp(&b.mad())
                 .unwrap_or(Ordering::Equal)
                 .then_with(|| a.song_count.cmp(&b.song_count))
                 .then_with(|| b.decade.cmp(&a.decade))
@@ -1445,6 +2088,51 @@ fn format_score(value: f64) -> String {
     format_count(value.round() as i64)
 }
 
+fn format_deviation(value: f64) -> String {
+    format!("{value:.1}")
+}
+
+fn mean_absolute_deviation(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let mean = values.iter().sum::<f64>() / values.len() as f64;
+    values.iter().map(|value| (value - mean).abs()).sum::<f64>() / values.len() as f64
+}
+
+fn format_percent(value: Option<f64>) -> String {
+    value
+        .map(|value| format!("{value:.1}%"))
+        .unwrap_or_else(|| "—".to_string())
+}
+
+fn format_decision(value: Option<f64>) -> String {
+    match value {
+        Some(value) if value < 10.0 => format!("{value:.1}s"),
+        Some(value) if value < 60.0 => format!("{value:.0}s"),
+        Some(value) => format!(
+            "{}m {}s",
+            (value / 60.0).floor() as i64,
+            (value % 60.0).round() as i64
+        ),
+        None => "—".to_string(),
+    }
+}
+
+fn format_duration_seconds(value: f64) -> String {
+    if !value.is_finite() || value <= 0.0 {
+        return "—".to_string();
+    }
+    let total_seconds = value.round() as i64;
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    if hours > 0 {
+        format!("{hours}h {minutes}m")
+    } else {
+        format!("{minutes}m")
+    }
+}
+
 fn format_runtime(total_ms: i64) -> String {
     if total_ms <= 0 {
         return "—".to_string();
@@ -1480,5 +2168,27 @@ mod tests {
         assert_eq!(format_runtime(0), "—");
         assert_eq!(format_runtime(90_000), "1m");
         assert_eq!(format_runtime(3_660_000), "1h 01m");
+    }
+
+    #[test]
+    fn divisive_metric_is_mean_absolute_deviation() {
+        assert!((mean_absolute_deviation(&[1000.0, 1000.0, 1000.0]) - 0.0).abs() < 1e-9);
+        assert!((mean_absolute_deviation(&[900.0, 1000.0, 1100.0]) - 66.6666666667).abs() < 1e-6);
+        assert!((mean_absolute_deviation(&[1000.0, 1200.0]) - 100.0).abs() < 1e-9);
+        assert_eq!(mean_absolute_deviation(&[]), 0.0);
+        assert_eq!(format_deviation(66.666), "66.7");
+    }
+
+    #[test]
+    fn formats_voter_story_values() {
+        assert_eq!(format_percent(Some(61.26)), "61.3%");
+        assert_eq!(format_percent(None), "—");
+        assert_eq!(format_decision(Some(1.24)), "1.2s");
+        assert_eq!(format_decision(Some(34.6)), "35s");
+        assert_eq!(format_decision(Some(75.0)), "1m 15s");
+        assert_eq!(format_decision(None), "—");
+        assert_eq!(format_duration_seconds(0.0), "—");
+        assert_eq!(format_duration_seconds(90.0), "1m");
+        assert_eq!(format_duration_seconds(3_660.0), "1h 1m");
     }
 }

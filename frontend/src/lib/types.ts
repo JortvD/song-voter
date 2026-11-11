@@ -452,7 +452,7 @@ export type StoryTrack = {
 
 export type StoryCard = {
   id: string
-  category: 'album' | 'artist' | 'decade' | 'duel' | 'tape'
+  category: 'album' | 'artist' | 'decade' | 'duel' | 'tape' | 'voter'
   eyebrow: string
   title: string
   subtitle: string | null
@@ -473,7 +473,7 @@ export type StoryLeaderboardRow = {
 
 export type StoryLeaderboard = {
   id: string
-  category: 'album' | 'artist' | 'decade' | 'duel'
+  category: 'album' | 'artist' | 'decade' | 'duel' | 'voter'
   title: string
   metric_label: string
   detail_label: string
