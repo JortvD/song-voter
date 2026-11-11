@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 
 import { useAuth } from '../../context/AuthContext'
@@ -116,28 +116,29 @@ export function AdminVoters() {
   const [moreColumns, setMoreColumns] = useState(false)
   const timezone = localTimezone()
 
-  const load = useCallback(async () => {
+  useEffect(() => {
     let active = true
     setLoading(true)
     setError(null)
-    try {
-      const next = await api.getAdminVoters(offset, PAGE_SIZE, query, sort)
-      if (active) setData(next)
-    } catch (caught) {
-      if (active) {
-        setError(caught instanceof ApiError ? caught.message : 'Could not load voters')
-      }
-    } finally {
-      if (active) setLoading(false)
-    }
+
+    api
+      .getAdminVoters(offset, PAGE_SIZE, query, sort)
+      .then((next) => {
+        if (active) setData(next)
+      })
+      .catch((caught: unknown) => {
+        if (active) {
+          setError(caught instanceof ApiError ? caught.message : 'Could not load voters')
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+
     return () => {
       active = false
     }
   }, [offset, query, refreshKey, sort])
-
-  useEffect(() => {
-    void load()
-  }, [load])
 
   function applySearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
