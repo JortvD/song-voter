@@ -81,6 +81,23 @@ existing `heavy_work` semaphore permit.
 Values are clamped server-side; every changed key is logged with
 `admin_id` and `admin_username`.
 
+### Track removal
+
+The song deep dive has a **Remove track** action, intended for mistakes such as
+a duplicate entry. The admin sees the track's rank, the number of votes and
+duels that will be deleted, and must type `REMOVE`. The endpoint
+`DELETE /api/admin/tracks/{id}`:
+
+1. locks the active playlist and verifies the track belongs to it,
+2. refuses to leave fewer than two tracks,
+3. counts and deletes the track (votes, seen pairs and `track_artists` cascade),
+4. replays the remaining vote ledger with `rebuild_playlist_ratings`, so every
+   remaining song's rating, comparisons, wins and `last_compared_at` are correct,
+5. clears the admin caches and writes an `admin_track_removed` audit event.
+
+The UI closes the panel, refreshes the active section and shows a confirmation
+with the number of deleted votes/duels and rebuilt tracks.
+
 ## Verification
 
 ### Unit tests
@@ -122,6 +139,11 @@ Results:
 - Idle exclusion reports `idle_excluded = 1` after the planted 2-hour gap, and
   that gap is absent from medians.
 - Flags stayed correct after the 100k scale-up.
+- Track removal was exercised against a copy of the seeded database: removing
+  “Winter Orbit” (rank 150, 6 votes) returned 200, dropped the track count from
+  150 to 149, votes from 270 to 264 and seen pairs from 291 to 285, deleted its
+  `track_artists` rows, and replayed 264 votes across the 149 remaining tracks.
+  A non-admin received 403; a wrong confirmation received 400.
 
 ### `EXPLAIN ANALYZE`
 
@@ -186,6 +208,8 @@ viewport on every section; wide tables scroll inside their own card.
 | Live-pairing confirmation | ![](screenshots/desktop-settings-confirm.png) | |
 | Song deep dive | ![](screenshots/desktop-song-deep-dive.png) | |
 | Voter detail | ![](screenshots/desktop-voter-detail.png) | |
+| Remove track confirmation | ![](screenshots/desktop-remove-track-confirm.png) | |
+| Remove track result | ![](screenshots/desktop-remove-track-done.png) | |
 
 ## Approximations and notes
 

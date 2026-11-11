@@ -5,6 +5,7 @@ use crate::state::AppState;
 
 pub mod admin;
 pub mod admin_stats;
+pub mod admin_tracks;
 pub mod admin_voters;
 pub mod aggregate;
 pub mod analytics;
@@ -57,6 +58,7 @@ pub fn router() -> Router<AppState> {
         .route("/admin/insights", get(dashboard::insights))
         .route("/admin/duels", get(admin_stats::duels))
         .route("/admin/songs/{id}", get(admin_stats::song_detail))
+        .route("/admin/tracks/{id}", delete(admin_tracks::remove_track))
         .route("/admin/standings", get(admin_stats::standings))
         .route("/admin/pairing", get(admin_stats::pairing_health))
         .route("/admin/progress", get(admin_stats::progress_forecast))

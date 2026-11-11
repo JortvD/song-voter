@@ -61,6 +61,7 @@ function MissionControl() {
   const [error, setError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [songId, setSongId] = useState<string | null>(null)
+  const [actionNotice, setActionNotice] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -97,6 +98,22 @@ function MissionControl() {
         error={error}
         onRefresh={refresh}
       />
+
+      {actionNotice && (
+        <div
+          role="status"
+          className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border-2 border-ok/50 bg-ok/5 px-4 py-3"
+        >
+          <p className="min-w-0 text-sm leading-relaxed text-ink">{actionNotice}</p>
+          <button
+            type="button"
+            onClick={() => setActionNotice(null)}
+            className="pv-admin-button shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
         <AdminNav section={section} onChange={setSection} insights={insights} />
@@ -275,7 +292,15 @@ function MissionControl() {
       </div>
 
       {songId && (
-        <SongDeepDive trackId={songId} onClose={() => setSongId(null)} />
+        <SongDeepDive
+          trackId={songId}
+          onClose={() => setSongId(null)}
+          onRemoved={(message) => {
+            setSongId(null)
+            setActionNotice(message)
+            refresh()
+          }}
+        />
       )}
     </div>
   )

@@ -104,6 +104,7 @@ docker compose logs -f backend
 | `GET` | `/api/admin/insights` | admin | Mission-control totals, charts, top tracks, top voters and recent picks (`days`, 1–90) |
 | `GET` | `/api/admin/duels` | admin | Paginated duel feed with no-vote rows, filters and full per-vote detail (`limit`, `offset`, `only`, `sort`, `user`, `q`, `track_id`, `hours`, `from`, `to`) |
 | `GET` | `/api/admin/songs/{id}` | admin | Song deep dive: summary, rank history, rating line and paginated duel history |
+| `DELETE` | `/api/admin/tracks/{id}` | admin | Remove a track and its votes/duels, then rebuild the standings; requires `{"confirm":"REMOVE"}` |
 | `GET` | `/api/admin/standings` | admin | Extended standings with 24h rank change, form and no-vote rate (`limit`, `offset`, `q`) |
 | `GET` | `/api/admin/pairing` | admin | Rank-bucket health, settling, bottom share and pairing quality (`hours`, `from`, `lookback_hours`) |
 | `GET` | `/api/admin/progress` | admin | Pace, target progress, reveal forecast and ranking stability |
@@ -393,7 +394,10 @@ the same cream, cobalt and safety-orange visual language as the public site.
 - **Standings** — the complete official standings with score, duels and wins even
   while The Standings are sealed; search, pagination and CSV export. *More
   columns* adds 24h rank change, win rate, form (wins minus expected wins) and
-  no-vote rate. Clicking a song opens its deep dive.
+  no-vote rate. Clicking a song opens its deep dive. A duplicate can be removed
+  from the song panel: **Remove track** deletes its votes and duels and replays
+  the remaining ledger so every other song's rating is rebuilt. It requires
+  typing `REMOVE` and cannot be undone.
 - **Pairing health** — whether rank weighting is on, the effective strength,
   scale and minimum average, rank-bucket served/target/unweighted shares,
   comparisons÷weight, evenness now and one lookback ago, settling status, the

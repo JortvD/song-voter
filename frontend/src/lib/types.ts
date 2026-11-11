@@ -789,6 +789,19 @@ export type AdminRatingPoint = {
   won: boolean
 }
 
+export type AdminRemoveTrackResult = {
+  removed: boolean
+  id: string
+  title: string
+  artists: string
+  rank: number
+  deleted_votes: number
+  deleted_duels: number
+  votes_replayed: number
+  tracks_updated: number
+  remaining_tracks: number
+}
+
 export type AdminSongDetail = {
   as_of: string
   track: AdminSongTrack

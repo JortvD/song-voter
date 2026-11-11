@@ -7,6 +7,7 @@ import type {
   AdminInsights,
   AdminPairingHealth,
   AdminProgressForecast,
+  AdminRemoveTrackResult,
   AdminRenameUserResult,
   AdminResetPasswordResult,
   AdminSetDisabledResult,
@@ -340,6 +341,11 @@ export const api = {
     request<AdminSongDetail>(
       `/api/admin/songs/${id}?limit=${limit}&offset=${offset}`,
     ),
+  removeAdminTrack: (id: string, confirm: string) =>
+    request<AdminRemoveTrackResult>(`/api/admin/tracks/${id}`, {
+      method: 'DELETE',
+      body: { confirm },
+    }),
   getAdminStandings: (offset = 0, limit = 50, query = '') =>
     request<AdminStandingsPage>(
       `/api/admin/standings?limit=${limit}&offset=${offset}&q=${encodeURIComponent(query)}`,

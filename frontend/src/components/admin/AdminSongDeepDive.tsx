@@ -43,14 +43,20 @@ function RankArrow({
 export function SongDeepDive({
   trackId,
   onClose,
+  onRemoved,
 }: {
   trackId: string
   onClose: () => void
+  onRemoved: (message: string) => void
 }) {
   const [data, setData] = useState<AdminSongDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [offset, setOffset] = useState(0)
+  const [removeOpen, setRemoveOpen] = useState(false)
+  const [removeConfirm, setRemoveConfirm] = useState('')
+  const [removing, setRemoving] = useState(false)
+  const [removeError, setRemoveError] = useState<string | null>(null)
   const pageSize = 15
 
   const load = useCallback(async () => {
@@ -76,6 +82,29 @@ export function SongDeepDive({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  async function removeTrack() {
+    if (!data || removing) return
+    if (removeConfirm.trim() !== 'REMOVE') {
+      setRemoveError('Type REMOVE to confirm.')
+      return
+    }
+
+    setRemoving(true)
+    setRemoveError(null)
+    try {
+      const result = await api.removeAdminTrack(trackId, removeConfirm)
+      onRemoved(
+        `Removed “${result.title}” by ${result.artists}. Deleted ${result.deleted_votes.toLocaleString()} votes and ${result.deleted_duels.toLocaleString()} duels, then rebuilt ${result.tracks_updated.toLocaleString()} remaining tracks.`,
+      )
+    } catch (caught) {
+      setRemoveError(
+        caught instanceof ApiError ? caught.message : 'Could not remove this track',
+      )
+    } finally {
+      setRemoving(false)
+    }
+  }
 
   const record = data?.record
   const formZone =
@@ -120,8 +149,20 @@ export function SongDeepDive({
               </p>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             <AsOf value={data?.as_of} />
+            <button
+              type="button"
+              onClick={() => {
+                setRemoveError(null)
+                setRemoveConfirm('')
+                setRemoveOpen(true)
+              }}
+              disabled={!data}
+              className="pv-admin-button pv-admin-button-danger"
+            >
+              Remove track
+            </button>
             <button type="button" onClick={onClose} className="pv-admin-button">
               Close
             </button>
@@ -253,6 +294,80 @@ export function SongDeepDive({
           </div>
         ) : null}
       </section>
+
+      {removeOpen && data && (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-ink/50 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="remove-track-title"
+            className="w-full max-w-lg rounded-2xl border-2 border-ink bg-card p-5 shadow-[6px_6px_0_0_var(--color-ink)]"
+          >
+            <p className="pv-admin-label text-danger">Destructive</p>
+            <h3
+              id="remove-track-title"
+              className="mt-1 font-serif text-2xl tracking-[-0.02em]"
+            >
+              Remove this track?
+            </h3>
+            <p className="mt-2 text-sm leading-relaxed text-muted">
+              <span className="font-semibold text-ink">{data.track.title}</span> by{' '}
+              {data.track.artists}, currently #{data.track.current_rank}. This is
+              meant for mistakes such as a duplicate entry.
+            </p>
+            <div className="mt-3 rounded-xl border border-danger/40 bg-danger/5 p-3 text-xs leading-relaxed text-danger">
+              This deletes {formatNumber(data.record.shown_duels)} duels and{' '}
+              {formatNumber(data.record.voted_duels)} votes involving this track,
+              then replays the remaining vote ledger so every other song&apos;s
+              rating, duels and wins are rebuilt. It cannot be undone.
+            </div>
+            <p className="mt-3 text-xs leading-relaxed text-muted">
+              If you found a duplicate, open both copies and remove the lower-ranked
+              one. If a voter currently has this song on screen, that duel can no
+              longer be submitted.
+            </p>
+            <label className="mt-3 block">
+              <span className="pv-admin-label text-[8px]">
+                Type REMOVE to confirm
+              </span>
+              <input
+                type="text"
+                value={removeConfirm}
+                onChange={(event) => {
+                  setRemoveConfirm(event.target.value)
+                  setRemoveError(null)
+                }}
+                autoComplete="off"
+                className="pv-admin-input mt-1 font-mono text-sm uppercase"
+                placeholder="REMOVE"
+              />
+            </label>
+            {removeError && (
+              <p role="alert" className="mt-2 text-xs text-danger">
+                {removeError}
+              </p>
+            )}
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setRemoveOpen(false)}
+                disabled={removing}
+                className="pv-admin-button"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void removeTrack()}
+                disabled={removing || removeConfirm.trim() !== 'REMOVE'}
+                className="pv-admin-button pv-admin-button-danger"
+              >
+                {removing ? 'Removing…' : 'Remove track'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
