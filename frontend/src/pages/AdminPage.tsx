@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import { AdminDangerZone } from '../components/AdminDangerZone'
 import { AdminInvites } from '../components/AdminInvites'
@@ -36,20 +36,25 @@ const SECTIONS: AdminSection[] = [
   'danger',
 ]
 
-function initialSection(): AdminSection {
-  if (typeof window === 'undefined') return 'overview'
-
-  const params = new URLSearchParams(window.location.search)
-  if (params.has('spotify')) return 'playlist'
-  const requested = params.get('section')
-  return SECTIONS.includes(requested as AdminSection)
-    ? (requested as AdminSection)
-    : 'overview'
-}
-
 function MissionControl() {
   const { refresh: refreshPlaylist } = usePlaylist()
-  const [section, setSection] = useState<AdminSection>(initialSection)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedSection = searchParams.get('section')
+  const section: AdminSection = SECTIONS.includes(requestedSection as AdminSection)
+    ? (requestedSection as AdminSection)
+    : searchParams.has('spotify')
+      ? 'playlist'
+      : 'overview'
+
+  function setSection(next: AdminSection) {
+    if (next === section && !searchParams.has('spotify')) return
+
+    const params = new URLSearchParams(searchParams)
+    params.delete('spotify')
+    params.set('section', next)
+    setSearchParams(params)
+  }
+
   const [insights, setInsights] = useState<AdminInsights | null>(null)
   const [days, setDays] = useState(14)
   const [loading, setLoading] = useState(true)

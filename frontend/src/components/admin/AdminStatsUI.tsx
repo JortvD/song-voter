@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useEffect, useId, useState } from 'react'
+import type { FormEvent, ReactNode } from 'react'
 
 import type { AdminHeatmap } from '../../lib/types'
 
@@ -305,5 +306,92 @@ export function SectionNote({ children }: { children: ReactNode }) {
     <p className="rounded-xl border border-line bg-paper px-3 py-2 text-xs leading-relaxed text-muted">
       {children}
     </p>
+  )
+}
+
+/**
+ * Previous / numbered page / next controls for every paginated admin list.
+ * The number field is the fastest way to jump through long feeds.
+ */
+export function AdminPagination({
+  offset,
+  limit,
+  total,
+  onPageChange,
+}: {
+  offset: number
+  limit: number
+  total: number
+  onPageChange: (offset: number) => void
+}) {
+  const pageInputId = useId()
+  const pages = Math.max(1, Math.ceil(Math.max(0, total) / Math.max(1, limit)))
+  const page = Math.min(pages, Math.floor(Math.max(0, offset) / Math.max(1, limit)) + 1)
+  const [value, setValue] = useState(String(page))
+
+  useEffect(() => {
+    setValue(String(page))
+  }, [page])
+
+  const first = total > 0 ? Math.min(offset + 1, total) : 0
+  const last = Math.min(offset + limit, total)
+
+  function go(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const requested = Number(value)
+    const next = Number.isFinite(requested)
+      ? Math.min(pages, Math.max(1, Math.trunc(requested)))
+      : page
+    onPageChange((next - 1) * limit)
+    setValue(String(next))
+  }
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+      <button
+        type="button"
+        onClick={() => onPageChange(Math.max(0, offset - limit))}
+        disabled={page <= 1}
+        className="btn-ghost"
+      >
+        Previous
+      </button>
+
+      <form
+        onSubmit={go}
+        className="flex flex-wrap items-center justify-center gap-2 font-mono text-[9px] uppercase tracking-[0.12em] text-muted"
+      >
+        <label htmlFor={pageInputId} className="hidden sm:inline">
+          Page
+        </label>
+        <input
+          id={pageInputId}
+          type="number"
+          min={1}
+          max={pages}
+          inputMode="numeric"
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          aria-label="Page number"
+          className="field w-16 py-1 text-center text-xs"
+        />
+        <span>of {pages.toLocaleString()}</span>
+        <button type="submit" className="btn-ghost">
+          Go
+        </button>
+        <span className="w-full text-center sm:w-auto">
+          {first.toLocaleString()}–{last.toLocaleString()} of {total.toLocaleString()}
+        </span>
+      </form>
+
+      <button
+        type="button"
+        onClick={() => onPageChange(Math.min((pages - 1) * limit, offset + limit))}
+        disabled={page >= pages}
+        className="btn-ghost"
+      >
+        Next
+      </button>
+    </div>
   )
 }

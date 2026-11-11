@@ -10,6 +10,7 @@ import { AdminUserActions } from '../AdminUserActions'
 import { AdminCrowd } from './AdminCrowd'
 import { AdminVoterDetail } from './AdminVoterDetail'
 import {
+  AdminPagination,
   AsOf,
   formatNumber,
   formatPercent,
@@ -169,8 +170,6 @@ export function AdminVoters() {
     }
   }
 
-  const first = data && data.total > 0 ? data.offset + 1 : 0
-  const last = data ? Math.min(data.offset + data.limit, data.total) : 0
   const flagByKey = new Map((data?.flag_summary ?? []).map((flag) => [flag.key, flag]))
 
   return (
@@ -431,27 +430,12 @@ export function AdminVoters() {
                 </table>
               </div>
 
-              <div className="mt-4 flex items-center justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-                  disabled={offset === 0}
-                  className="btn-ghost"
-                >
-                  Previous
-                </button>
-                <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
-                  {first}–{last} of {formatNumber(data.total)}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setOffset(offset + PAGE_SIZE)}
-                  disabled={last >= data.total}
-                  className="btn-ghost"
-                >
-                  Next
-                </button>
-              </div>
+              <AdminPagination
+                offset={offset}
+                limit={PAGE_SIZE}
+                total={data.total}
+                onPageChange={setOffset}
+              />
             </>
           ) : (
             <p className="border border-dashed border-line px-3 py-6 text-center text-xs text-muted">

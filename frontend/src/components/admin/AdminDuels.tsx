@@ -3,6 +3,7 @@ import { Fragment, useCallback, useEffect, useState } from 'react'
 import { ApiError, api } from '../../lib/api'
 import type { AdminDuel, AdminDuelPage } from '../../lib/types'
 import {
+  AdminPagination,
   AsOf,
   formatDecimal,
   formatNumber,
@@ -324,9 +325,6 @@ export function AdminDuelFeed({
     setApplied({ only: initialOnly, hours: '', subject: '', voter: '', from: '', to: '' })
   }
 
-  const first = data && data.total > 0 ? data.offset + 1 : 0
-  const last = data ? Math.min(data.offset + data.limit, data.total) : 0
-
   return (
     <div className="pv-admin-panel">
       <div className="flex flex-wrap items-end justify-between gap-2">
@@ -451,27 +449,12 @@ export function AdminDuelFeed({
       </div>
 
       {data && data.total > 0 && (
-        <div className="mt-3 flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={() => setOffset(Math.max(0, offset - pageSize))}
-            disabled={offset === 0}
-            className="pv-admin-button"
-          >
-            Previous
-          </button>
-          <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
-            {first}–{last} of {formatNumber(data.total)}
-          </span>
-          <button
-            type="button"
-            onClick={() => setOffset(offset + pageSize)}
-            disabled={last >= data.total}
-            className="pv-admin-button"
-          >
-            Next
-          </button>
-        </div>
+        <AdminPagination
+          offset={offset}
+          limit={pageSize}
+          total={data.total}
+          onPageChange={setOffset}
+        />
       )}
     </div>
   )

@@ -4,6 +4,7 @@ import type { FormEvent } from 'react'
 import { ApiError, api } from '../lib/api'
 import type { AdminStandingsPage } from '../lib/types'
 import {
+  AdminPagination,
   AsOf,
   formatNumber,
   formatPercent,
@@ -90,9 +91,6 @@ export function AdminRankingTable({
     setQuery('')
     setOffset(0)
   }
-
-  const first = data && data.total > 0 ? data.offset + 1 : 0
-  const last = data ? Math.min(data.offset + data.limit, data.total) : 0
 
   return (
     <section className="panel">
@@ -250,27 +248,12 @@ export function AdminRankingTable({
               </table>
             </div>
 
-            <div className="mt-4 flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-                disabled={offset === 0}
-                className="btn-ghost"
-              >
-                Previous
-              </button>
-              <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
-                {first}–{last} of {formatNumber(data.total)}
-              </span>
-              <button
-                type="button"
-                onClick={() => setOffset(offset + PAGE_SIZE)}
-                disabled={last >= data.total}
-                className="btn-ghost"
-              >
-                Next
-              </button>
-            </div>
+            <AdminPagination
+              offset={offset}
+              limit={PAGE_SIZE}
+              total={data.total}
+              onPageChange={setOffset}
+            />
             <p className="mt-2 text-[11px] leading-relaxed text-muted">
               Form is wins minus expected wins: positive means a song is
               outperforming its rating, negative means it is underperforming.

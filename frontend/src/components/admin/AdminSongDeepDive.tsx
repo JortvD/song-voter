@@ -4,6 +4,7 @@ import { ApiError, api } from '../../lib/api'
 import type { AdminSongDetail } from '../../lib/types'
 import { DuelRows } from './AdminDuels'
 import {
+  AdminPagination,
   AsOf,
   formatDecimal,
   formatNumber,
@@ -241,29 +242,12 @@ export function SongDeepDive({
               </div>
               <DuelRows duels={data.history.duels} />
               {data.history.total > pageSize && (
-                <div className="mt-3 flex items-center justify-between gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setOffset(Math.max(0, offset - pageSize))}
-                    disabled={offset === 0}
-                    className="pv-admin-button"
-                  >
-                    Previous
-                  </button>
-                  <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted">
-                    {offset + 1}–
-                    {Math.min(offset + pageSize, data.history.total)} of{' '}
-                    {formatNumber(data.history.total)}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setOffset(offset + pageSize)}
-                    disabled={offset + pageSize >= data.history.total}
-                    className="pv-admin-button"
-                  >
-                    Next
-                  </button>
-                </div>
+                <AdminPagination
+                  offset={offset}
+                  limit={pageSize}
+                  total={data.history.total}
+                  onPageChange={setOffset}
+                />
               )}
             </div>
           </div>

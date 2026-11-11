@@ -53,6 +53,10 @@ existing `heavy_work` semaphore permit.
   and song-insight panels. The old hourly chart was replaced by the weekday×hour
   heatmap, and the old recent-picks panel now links to the richer Duels feed.
 - A reusable song deep-dive drawer is opened from Standings and the duel feed.
+- All paginated admin lists (duels, voters, standings and a song's duel history)
+  now have numbered page controls: Previous / a page-number field with Go / Next.
+- The active admin tab is stored in the URL as `?section=duels`, `?section=voters`,
+  etc., so reload, bookmarking and browser back/forward return to the same tab.
 - **Settings** is grouped into Live pairing and Statistics, shows defaults and
   ranges, has a reset-to-defaults button, and asks for confirmation before any
   live-pairing change.
@@ -174,7 +178,9 @@ viewport on every section; wide tables scroll inside their own card.
 | Overview | ![](screenshots/desktop-overview.png) | ![](screenshots/phone-overview.png) |
 | Duels | ![](screenshots/desktop-duels.png) | ![](screenshots/phone-duels.png) |
 | Voters | ![](screenshots/desktop-voters.png) | ![](screenshots/phone-voters.png) |
+| Numbered page jump (voters) | ![](screenshots/desktop-voters-page2.png) | |
 | Standings (more columns) | ![](screenshots/desktop-standings.png) | |
+| Numbered page jump (standings) | ![](screenshots/desktop-standings-page2.png) | |
 | Pairing health | ![](screenshots/desktop-pairing.png) | ![](screenshots/phone-pairing.png) |
 | Settings | ![](screenshots/desktop-settings.png) | ![](screenshots/phone-settings.png) |
 | Live-pairing confirmation | ![](screenshots/desktop-settings-confirm.png) | |
