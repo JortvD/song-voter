@@ -4,7 +4,10 @@ use axum::Router;
 use crate::state::AppState;
 
 pub mod admin;
+pub mod admin_stats;
+pub mod admin_voters;
 pub mod aggregate;
+pub mod analytics;
 pub mod auth;
 pub mod chart;
 pub mod dashboard;
@@ -52,6 +55,16 @@ pub fn router() -> Router<AppState> {
             get(settings::get_settings).patch(settings::update_settings),
         )
         .route("/admin/insights", get(dashboard::insights))
+        .route("/admin/duels", get(admin_stats::duels))
+        .route("/admin/songs/{id}", get(admin_stats::song_detail))
+        .route("/admin/standings", get(admin_stats::standings))
+        .route("/admin/pairing", get(admin_stats::pairing_health))
+        .route("/admin/progress", get(admin_stats::progress_forecast))
+        .route("/admin/song-insights", get(admin_stats::song_insights))
+        .route("/admin/vote-quality", get(admin_stats::vote_quality))
+        .route("/admin/voters", get(admin_voters::voters))
+        .route("/admin/voters/{id}", get(admin_voters::voter_detail))
+        .route("/admin/crowd", get(admin_voters::crowd))
         .route("/admin/users", get(dashboard::users))
         .route("/admin/users.csv", get(dashboard::users_csv))
         .route("/admin/users/{id}", delete(users::delete_user))
