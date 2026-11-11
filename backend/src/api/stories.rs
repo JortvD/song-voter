@@ -293,7 +293,7 @@ pub async fn public(State(state): State<AppState>) -> Result<Json<Value>, ApiErr
                 ApiError::service_unavailable("the server is busy; please try again")
             })?;
 
-            let stories = load_stories(&state.db, &playlist, true, false).await?;
+            let stories = load_stories(&state.db, &playlist, true, true).await?;
             serde_json::to_value(stories).map_err(ApiError::internal)
         })
         .await?;
@@ -776,9 +776,9 @@ async fn load_story_cards(
     Ok(cards)
 }
 
-/// Admin-only stories about the people doing the voting. These deliberately
-/// stay out of the public Liner notes: they expose individual behaviour, not
-/// just the resulting song standings.
+/// Stories about the people doing the voting. They are included on the admin
+/// dashboard immediately and on the public Stats page once The Reveal is open
+/// (the public stories endpoint itself is reveal-gated).
 async fn load_voter_story_cards(
     pool: &PgPool,
     playlist_id: Uuid,

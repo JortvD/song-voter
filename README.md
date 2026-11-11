@@ -312,10 +312,11 @@ snapshots, other voters' picks on the same tracks remain intact.
   argued-about duel, and a tape-at-a-glance summary. “Divisive” is the mean
   absolute deviation of an album/artist/decade's rated songs from its own
   average rating. Cards are omitted until their minimum sample is met.
-  `GET /api/chart/stories` exposes the same data and leaderboards. The admin
-  Liner notes additionally include voter-behaviour stories and leaderboards
-  (activity, agreement, decision speed, session length, taste and side lean);
-  these stay admin-only and are not part of the public stories response.
+  `GET /api/chart/stories` exposes the same data and leaderboards. The Liner
+  notes also include voter-behaviour stories and leaderboards (activity,
+  agreement, decision speed, session length, taste and side lean). They are
+  computed for the admin dashboard immediately and become visible on the public
+  Stats page only after The Reveal, because `/api/chart/stories` is reveal-gated.
 - Decade stats come from Spotify release dates. Genres are Spotify artist genres
   mapped to a stable broad set; if Spotify rejects or omits the artist lookup, the
   backfill still completes, keeps all release/album metadata, and leaves genres
