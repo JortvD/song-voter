@@ -3,6 +3,9 @@ import { Link } from 'react-router-dom'
 
 import { AdminSectionHeader } from './AdminSectionHeader'
 import type { AdminSection } from './AdminNav'
+import { AdminProgressPanel } from './AdminProgressPanel'
+import { AdminSongInsightsPanel } from './AdminSongInsightsPanel'
+import { AdminVoteQualityPanel } from './AdminVoteQualityPanel'
 import { StoryCardGrid, StoryLeaderboards } from '../StoryCards'
 import { api } from '../../lib/api'
 import type { AdminInsights, ChartStories } from '../../lib/types'
@@ -15,6 +18,7 @@ type Props = {
   onDaysChange: (days: number) => void
   onRefresh: () => void
   onNavigate: (section: AdminSection) => void
+  onOpenSong: (id: string) => void
 }
 
 function formatNumber(value: number) {
@@ -189,49 +193,6 @@ function DailyChart({ data }: { data: AdminInsights['daily'] }) {
             Clear
           </button>
         )}
-      </div>
-    </div>
-  )
-}
-
-function HourlyChart({ data }: { data: AdminInsights['hourly'] }) {
-  const max = Math.max(1, ...data.map((hour) => hour.picks))
-  const total = data.reduce((sum, hour) => sum + hour.picks, 0)
-
-  return (
-    <div className="pv-admin-panel">
-      <div className="flex items-end justify-between gap-3">
-        <div>
-          <p className="pv-admin-label">Today</p>
-          <h3 className="font-serif text-xl text-ink">Picks by hour</h3>
-        </div>
-        <span className="pv-admin-label">{formatNumber(total)} today</span>
-      </div>
-
-      <div className="mt-5 flex h-28 items-end gap-0.5">
-        {data.map((hour) => (
-          <div
-            key={hour.hour}
-            title={`${hour.hour}:00 — ${hour.picks} picks`}
-            className="flex h-full flex-1 flex-col justify-end"
-          >
-            <div
-              className="w-full rounded-t-sm bg-[var(--color-ok)]"
-              style={{
-                height: hour.picks === 0 ? '2px' : `${Math.max(4, (hour.picks / max) * 100)}%`,
-                opacity: hour.picks === 0 ? 0.2 : 1,
-              }}
-            />
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-2 flex justify-between font-mono text-[8px] uppercase tracking-[0.1em] text-muted">
-        <span>00</span>
-        <span>06</span>
-        <span>12</span>
-        <span>18</span>
-        <span>23</span>
       </div>
     </div>
   )
@@ -499,46 +460,6 @@ function TopVotersPanel({
   )
 }
 
-function RecentPicksPanel({ data }: { data: AdminInsights['recent_picks'] }) {
-  return (
-    <div className="pv-admin-panel">
-      <div className="flex items-end justify-between gap-2">
-        <div>
-          <p className="pv-admin-label">Live feed</p>
-          <h3 className="font-serif text-xl text-ink">Recent picks</h3>
-        </div>
-        <span className="pv-admin-chip">{formatNumber(data.length)} latest</span>
-      </div>
-
-      {data.length === 0 ? (
-        <p className="mt-4 text-sm text-muted">No picks yet.</p>
-      ) : (
-        <ul className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
-          {data.map((pick, index) => (
-            <li
-              key={`${pick.created_at}-${index}`}
-              className="flex items-start gap-2.5 rounded-xl border border-line bg-paper p-2.5"
-            >
-              <TrackCover src={pick.winner_image_url} alt="" />
-              <div className="min-w-0 flex-1">
-                <p className="text-xs leading-relaxed text-muted">
-                  <span className="font-semibold text-ink">{pick.username}</span>{' '}
-                  picked{' '}
-                  <span className="font-semibold text-ink">{pick.winner_title}</span>{' '}
-                  over {pick.other_title}
-                </p>
-                <p className="mt-0.5 font-mono text-[8px] uppercase tracking-[0.1em] text-muted">
-                  {formatWhen(pick.created_at)}
-                </p>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  )
-}
-
 function StoriesPanel({ stories }: { stories: ChartStories | null }) {
   const hasStories = Boolean(
     stories &&
@@ -647,6 +568,7 @@ export function AdminOverview({
   onDaysChange,
   onRefresh,
   onNavigate,
+  onOpenSong,
 }: Props) {
   const [stories, setStories] = useState<ChartStories | null>(null)
 
@@ -812,8 +734,10 @@ export function AdminOverview({
 
       <div className="grid gap-4 xl:grid-cols-2">
         <DailyChart data={insights.daily} />
-        <HourlyChart data={insights.hourly} />
+        <AdminVoteQualityPanel />
       </div>
+
+      <AdminProgressPanel />
 
       <div className="grid gap-4 xl:grid-cols-3">
         <DistributionPanel data={insights.pick_distribution} />
@@ -826,7 +750,26 @@ export function AdminOverview({
         <TopVotersPanel data={insights.top_voters} onNavigate={onNavigate} />
       </div>
 
-      <RecentPicksPanel data={insights.recent_picks} />
+      <AdminSongInsightsPanel onOpenSong={onOpenSong} />
+
+      <div className="pv-admin-panel flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="pv-admin-label">Live feed moved</p>
+          <h3 className="font-serif text-xl text-ink">Every duel, including no votes</h3>
+          <p className="mt-1 max-w-xl text-sm leading-relaxed text-muted">
+            The old recent-picks list has been replaced by the Duels section:
+            filters, upsets, decision times and full row details.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => onNavigate('duels')}
+          className="pv-admin-button pv-admin-button-accent"
+        >
+          Open the duel feed
+        </button>
+      </div>
+
       <StoriesPanel stories={stories} />
     </div>
   )

@@ -2,8 +2,10 @@ import type { AdminInsights } from '../../lib/types'
 
 export type AdminSection =
   | 'overview'
+  | 'duels'
   | 'voters'
   | 'standings'
+  | 'pairing'
   | 'playlist'
   | 'reveal'
   | 'invites'
@@ -24,6 +26,11 @@ const items: Array<{
 }> = [
   { id: 'overview', label: 'Overview', hint: () => 'The whole room' },
   {
+    id: 'duels',
+    label: 'Duels',
+    hint: (insights) => (insights ? `${insights.total_duels} shown` : '—'),
+  },
+  {
     id: 'voters',
     label: 'Voters',
     hint: (insights) => (insights ? `${insights.total_users} accounts` : '—'),
@@ -32,6 +39,11 @@ const items: Array<{
     id: 'standings',
     label: 'Standings',
     hint: (insights) => (insights ? `${insights.total_tracks} songs` : '—'),
+  },
+  {
+    id: 'pairing',
+    label: 'Pairing health',
+    hint: () => 'Weighting',
   },
   {
     id: 'playlist',

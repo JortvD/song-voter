@@ -2,12 +2,23 @@ import type {
   AdminClearVotesResult,
   AdminDeleteUserResult,
   AdminForceLogoutResult,
+  AdminCrowd,
+  AdminDuelPage,
   AdminInsights,
+  AdminPairingHealth,
+  AdminProgressForecast,
   AdminRenameUserResult,
   AdminResetPasswordResult,
   AdminSetDisabledResult,
   AdminSettings,
+  AdminSettingsPatch,
+  AdminSongDetail,
+  AdminSongInsights,
+  AdminStandingsPage,
   AdminUsersPage,
+  AdminVoterDetail,
+  AdminVotersPage,
+  AdminVoteQuality,
   AggregateResponse,
   ChartFilters,
   ChartStatus,
@@ -296,11 +307,74 @@ export const api = {
     }),
   getAdminInsights: (days = 14) =>
     request<AdminInsights>(`/api/admin/insights?days=${days}`),
+  getAdminDuels: (
+    params: {
+      limit?: number
+      offset?: number
+      only?: 'all' | 'voted' | 'no_vote' | 'upset'
+      sort?: 'recent' | 'upsets'
+      userId?: string
+      trackId?: string
+      q?: string
+      user?: string
+      from?: string
+      to?: string
+      hours?: number
+    } = {},
+  ) => {
+    const query = new URLSearchParams()
+    if (params.limit != null) query.set('limit', String(params.limit))
+    if (params.offset != null) query.set('offset', String(params.offset))
+    if (params.only) query.set('only', params.only)
+    if (params.sort) query.set('sort', params.sort)
+    if (params.userId) query.set('user_id', params.userId)
+    if (params.trackId) query.set('track_id', params.trackId)
+    if (params.q) query.set('q', params.q)
+    if (params.user) query.set('user', params.user)
+    if (params.from) query.set('from', params.from)
+    if (params.to) query.set('to', params.to)
+    if (params.hours != null) query.set('hours', String(params.hours))
+    return request<AdminDuelPage>(`/api/admin/duels?${query.toString()}`)
+  },
+  getAdminSong: (id: string, offset = 0, limit = 15) =>
+    request<AdminSongDetail>(
+      `/api/admin/songs/${id}?limit=${limit}&offset=${offset}`,
+    ),
+  getAdminStandings: (offset = 0, limit = 50, query = '') =>
+    request<AdminStandingsPage>(
+      `/api/admin/standings?limit=${limit}&offset=${offset}&q=${encodeURIComponent(query)}`,
+    ),
+  getAdminPairing: (hours = 24, from?: string, lookbackHours = 1) => {
+    const query = new URLSearchParams({
+      hours: String(hours),
+      lookback_hours: String(lookbackHours),
+    })
+    if (from) query.set('from', from)
+    return request<AdminPairingHealth>(`/api/admin/pairing?${query.toString()}`)
+  },
+  getAdminProgress: () =>
+    request<AdminProgressForecast>('/api/admin/progress'),
+  getAdminSongInsights: () =>
+    request<AdminSongInsights>('/api/admin/song-insights'),
+  getAdminVoteQuality: (timezone?: string) =>
+    request<AdminVoteQuality>(withTimezone('/api/admin/vote-quality', timezone)),
+  getAdminVoters: (offset = 0, limit = 50, query = '', sort = 'last_active') =>
+    request<AdminVotersPage>(
+      `/api/admin/voters?limit=${limit}&offset=${offset}&q=${encodeURIComponent(query)}&sort=${encodeURIComponent(sort)}`,
+    ),
+  getAdminVoterDetail: (id: string, timezone?: string, duelLimit = 10) =>
+    request<AdminVoterDetail>(
+      withTimezone(
+        `/api/admin/voters/${id}?duel_limit=${duelLimit}`,
+        timezone,
+      ),
+    ),
+  getAdminCrowd: () => request<AdminCrowd>('/api/admin/crowd'),
   getAdminSettings: () => request<AdminSettings>('/api/admin/settings'),
-  updateAdminSettings: (dailyStreakGoal: number) =>
+  updateAdminSettings: (patch: AdminSettingsPatch) =>
     request<AdminSettings>('/api/admin/settings', {
       method: 'PATCH',
-      body: { daily_streak_goal: dailyStreakGoal },
+      body: patch,
     }),
   getAdminStories: () => request<ChartStories>('/api/admin/stories'),
   getAdminRanking: (offset = 0, limit = 50, query = '') =>
