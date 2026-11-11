@@ -9,13 +9,13 @@ rendering chunks...
 computing gzip size...
 dist/index.html                            0.95 kB │ gzip:   0.46 kB
 dist/assets/index-BYOlpDp8.css           127.28 kB │ gzip:  17.80 kB
-dist/assets/StoryCards-BXIBKN8i.js         5.80 kB │ gzip:   1.61 kB
-dist/assets/DuelHistoryPage-DTHJtceQ.js    8.51 kB │ gzip:   2.92 kB
-dist/assets/RankingPage-CNE1QEvY.js       11.60 kB │ gzip:   3.59 kB
-dist/assets/DesignPage-BP1HICYN.js        11.63 kB │ gzip:   3.50 kB
-dist/assets/TrackFilters-DZX2WX-Y.js      13.34 kB │ gzip:   3.99 kB
-dist/assets/ChartPage-DbfVsATu.js         17.12 kB │ gzip:   4.94 kB
-dist/assets/StatsPage-CQu3SYUo.js         17.21 kB │ gzip:   4.63 kB
-dist/assets/AdminPage-Cs1qJ9Cj.js        158.80 kB │ gzip:  35.36 kB
-dist/assets/index-edS2U9Zq.js            349.70 kB │ gzip: 107.16 kB
-✓ built in 2.89s
+dist/assets/StoryCards-sRDXKDUX.js         5.80 kB │ gzip:   1.61 kB
+dist/assets/DuelHistoryPage-DdW-MVHG.js    8.51 kB │ gzip:   2.92 kB
+dist/assets/RankingPage-CnAvSOrS.js       11.60 kB │ gzip:   3.59 kB
+dist/assets/DesignPage-B5u9g_pP.js        11.63 kB │ gzip:   3.50 kB
+dist/assets/TrackFilters-GkK0HC_5.js      13.34 kB │ gzip:   3.99 kB
+dist/assets/ChartPage-ByboZ8Yn.js         17.12 kB │ gzip:   4.94 kB
+dist/assets/StatsPage-CSGOHL9U.js         17.21 kB │ gzip:   4.63 kB
+dist/assets/AdminPage-BiSfh6oq.js        158.75 kB │ gzip:  35.34 kB
+dist/assets/index-B0wLlAMN.js            349.70 kB │ gzip: 107.16 kB
+✓ built in 2.75s
