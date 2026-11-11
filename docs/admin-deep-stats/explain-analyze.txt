@@ -1,0 +1,609 @@
+=== duel count (recent, no filters)
+                                                            QUERY PLAN                                                            
+----------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=3124.45..3124.46 rows=1 width=8) (actual time=29.031..29.035 rows=1 loops=1)
+   Buffers: shared hit=1344
+   ->  Hash Join  (cost=9.67..2873.34 rows=100445 width=0) (actual time=0.126..25.138 rows=100445 loops=1)
+         Hash Cond: (sp.user_id = u.id)
+         Buffers: shared hit=1344
+         ->  Seq Scan on seen_pairs sp  (cost=0.00..2595.56 rows=100445 width=64) (actual time=0.013..13.436 rows=100445 loops=1)
+               Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+               Buffers: shared hit=1340
+         ->  Hash  (cost=6.52..6.52 rows=252 width=16) (actual time=0.094..0.096 rows=255 loops=1)
+               Buckets: 1024  Batches: 1  Memory Usage: 20kB
+               Buffers: shared hit=4
+               ->  Seq Scan on users u  (cost=0.00..6.52 rows=252 width=16) (actual time=0.005..0.036 rows=255 loops=1)
+                     Buffers: shared hit=4
+ Planning:
+   Buffers: shared hit=441
+ Planning Time: 3.604 ms
+ Execution Time: 29.120 ms
+(17 rows)
+
+=== duel page (newest 15, with hydration)
+                                                                                                   QUERY PLAN                                                                                                   
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=9848.14..9848.18 rows=15 width=361) (actual time=126.911..129.070 rows=15 loops=1)
+   Sort Key: sp.seen_at DESC, sp.track_low, sp.track_high
+   Sort Method: quicksort  Memory: 29kB
+   Buffers: shared hit=3799
+   CTE ranked
+     ->  WindowAgg  (cost=317.64..372.64 rows=2200 width=46) (actual time=1.325..2.126 rows=2200 loops=1)
+           Buffers: shared hit=177
+           ->  Sort  (cost=317.64..323.14 rows=2200 width=38) (actual time=1.313..1.447 rows=2200 loops=1)
+                 Sort Key: tracks.rating DESC, tracks.wins DESC, tracks.title, tracks.id
+                 Sort Method: quicksort  Memory: 234kB
+                 Buffers: shared hit=177
+                 ->  Seq Scan on tracks  (cost=0.00..195.50 rows=2200 width=38) (actual time=0.006..0.572 rows=2200 loops=1)
+                       Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                       Buffers: shared hit=168
+   ->  Nested Loop  (cost=9411.29..9475.21 rows=15 width=361) (actual time=126.556..129.037 rows=15 loops=1)
+         Join Filter: (th.id = sp.track_high)
+         Buffers: shared hit=3799
+         ->  Hash Join  (cost=9411.01..9463.44 rows=18 width=293) (actual time=126.529..128.978 rows=15 loops=1)
+               Hash Cond: (rh.id = sp.track_high)
+               Buffers: shared hit=3754
+               ->  CTE Scan on ranked rh  (cost=0.00..44.00 rows=2200 width=32) (actual time=1.328..1.501 rows=2200 loops=1)
+                     Buffers: shared hit=177
+               ->  Hash  (cost=9410.83..9410.83 rows=15 width=261) (actual time=125.172..127.328 rows=15 loops=1)
+                     Buckets: 1024  Batches: 1  Memory Usage: 12kB
+                     Buffers: shared hit=3577
+                     ->  Nested Loop  (cost=9346.91..9410.83 rows=15 width=261) (actual time=123.489..127.306 rows=15 loops=1)
+                           Join Filter: (tl.id = sp.track_low)
+                           Buffers: shared hit=3577
+                           ->  Hash Join  (cost=9346.63..9399.06 rows=18 width=193) (actual time=123.448..127.226 rows=15 loops=1)
+                                 Hash Cond: (rl.id = sp.track_low)
+                                 Buffers: shared hit=3532
+                                 ->  CTE Scan on ranked rl  (cost=0.00..44.00 rows=2200 width=32) (actual time=0.001..1.487 rows=2200 loops=1)
+                                 ->  Hash  (cost=9346.44..9346.44 rows=15 width=161) (actual time=123.416..125.571 rows=15 loops=1)
+                                       Buckets: 1024  Batches: 1  Memory Usage: 10kB
+                                       Buffers: shared hit=3532
+                                       ->  Limit  (cost=9344.31..9346.44 rows=15 width=161) (actual time=123.380..125.539 rows=15 loops=1)
+                                             Buffers: shared hit=3532
+                                             ->  Gather Merge  (cost=9344.31..17763.92 rows=59085 width=161) (actual time=123.378..125.536 rows=15 loops=1)
+                                                   Workers Planned: 1
+                                                   Workers Launched: 1
+                                                   Buffers: shared hit=3532
+                                                   ->  Result  (cost=8344.30..11150.83 rows=59085 width=161) (actual time=115.867..115.874 rows=15 loops=2)
+                                                         Buffers: shared hit=3532
+                                                         ->  Sort  (cost=8344.30..8492.01 rows=59085 width=153) (actual time=115.863..115.867 rows=15 loops=2)
+                                                               Sort Key: sp.seen_at DESC, sp.track_low, sp.track_high
+                                                               Sort Method: top-N heapsort  Memory: 30kB
+                                                               Buffers: shared hit=3532
+                                                               Worker 0:  Sort Method: top-N heapsort  Memory: 31kB
+                                                               ->  Hash Join  (cost=3122.22..6894.68 rows=59085 width=153) (actual time=28.303..98.981 rows=50222 loops=2)
+                                                                     Hash Cond: (sp.user_id = u.id)
+                                                                     Buffers: shared hit=3488
+                                                                     ->  Parallel Hash Right Join  (cost=3112.55..6284.17 rows=59085 width=137) (actual time=28.069..61.258 rows=50222 loops=2)
+                                                                           Hash Cond: ((v.user_id = sp.user_id) AND (v.track_low = sp.track_low) AND (v.track_high = sp.track_high))
+                                                                           Buffers: shared hit=3433
+                                                                           ->  Parallel Seq Scan on votes v  (cost=0.00..2754.73 rows=52938 width=144) (actual time=0.014..9.014 rows=44998 loops=2)
+                                                                                 Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                                                                                 Buffers: shared hit=2093
+                                                                           ->  Parallel Hash  (cost=2078.57..2078.57 rows=59085 width=73) (actual time=26.794..26.794 rows=50222 loops=2)
+                                                                                 Buckets: 131072  Batches: 1  Memory Usage: 12064kB
+                                                                                 Buffers: shared hit=1340
+                                                                                 ->  Parallel Seq Scan on seen_pairs sp  (cost=0.00..2078.57 rows=59085 width=73) (actual time=0.006..6.972 rows=50222 loops=2)
+                                                                                       Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                                                                                       Buffers: shared hit=1340
+                                                                     ->  Hash  (cost=6.52..6.52 rows=252 width=24) (actual time=0.077..0.078 rows=255 loops=2)
+                                                                           Buckets: 1024  Batches: 1  Memory Usage: 23kB
+                                                                           Buffers: shared hit=8
+                                                                           ->  Seq Scan on users u  (cost=0.00..6.52 rows=252 width=24) (actual time=0.012..0.035 rows=255 loops=2)
+                                                                                 Buffers: shared hit=8
+                           ->  Index Scan using tracks_pkey on tracks tl  (cost=0.28..0.64 rows=1 width=100) (actual time=0.004..0.004 rows=1 loops=15)
+                                 Index Cond: (id = rl.id)
+                                 Buffers: shared hit=45
+         ->  Index Scan using tracks_pkey on tracks th  (cost=0.28..0.64 rows=1 width=100) (actual time=0.003..0.003 rows=1 loops=15)
+               Index Cond: (id = rh.id)
+               Buffers: shared hit=45
+ Planning:
+   Buffers: shared hit=291
+ Planning Time: 3.230 ms
+ Execution Time: 129.560 ms
+(78 rows)
+
+=== standings aggregate + page
+                                                                                             QUERY PLAN                                                                                              
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=16643.51..16643.64 rows=50 width=152) (actual time=107.572..107.766 rows=50 loops=1)
+   Buffers: shared hit=7065
+   ->  Sort  (cost=16643.51..16649.01 rows=2200 width=152) (actual time=107.570..107.758 rows=50 loops=1)
+         Sort Key: (row_number() OVER (?))
+         Sort Method: top-N heapsort  Memory: 37kB
+         Buffers: shared hit=7065
+         ->  Hash Left Join  (cost=16481.86..16570.43 rows=2200 width=152) (actual time=102.400..106.647 rows=2200 loops=1)
+               Hash Cond: (tracks.id = s.track_id)
+               Buffers: shared hit=7062
+               ->  Hash Left Join  (cost=10212.59..10295.38 rows=2200 width=136) (actual time=51.948..55.019 rows=2200 loops=1)
+                     Hash Cond: (tracks.id = e.track_id)
+                     Buffers: shared hit=4368
+                     ->  WindowAgg  (cost=317.64..372.64 rows=2200 width=120) (actual time=1.350..3.182 rows=2200 loops=1)
+                           Buffers: shared hit=168
+                           ->  Sort  (cost=317.64..323.14 rows=2200 width=112) (actual time=1.345..1.647 rows=2200 loops=1)
+                                 Sort Key: tracks.rating DESC, tracks.wins DESC, tracks.title, tracks.id
+                                 Sort Method: quicksort  Memory: 392kB
+                                 Buffers: shared hit=168
+                                 ->  Seq Scan on tracks  (cost=0.00..195.50 rows=2200 width=112) (actual time=0.006..0.432 rows=2200 loops=1)
+                                       Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                                       Buffers: shared hit=168
+                     ->  Hash  (cost=9892.45..9892.45 rows=200 width=32) (actual time=50.580..50.682 rows=2200 loops=1)
+                           Buckets: 4096 (originally 1024)  Batches: 1 (originally 1)  Memory Usage: 170kB
+                           Buffers: shared hit=4200
+                           ->  Subquery Scan on e  (cost=9838.78..9892.45 rows=200 width=32) (actual time=45.823..49.690 rows=2200 loops=1)
+                                 Buffers: shared hit=4200
+                                 ->  Finalize GroupAggregate  (cost=9838.78..9890.45 rows=200 width=32) (actual time=45.822..49.363 rows=2200 loops=1)
+                                       Group Key: "*SELECT* 1".track_id
+                                       Buffers: shared hit=4200
+                                       ->  Gather Merge  (cost=9838.78..9885.45 rows=400 width=32) (actual time=45.817..47.609 rows=6019 loops=1)
+                                             Workers Planned: 2
+                                             Workers Launched: 2
+                                             Buffers: shared hit=4200
+                                             ->  Sort  (cost=8838.76..8839.26 rows=200 width=32) (actual time=42.306..42.473 rows=2006 loops=3)
+                                                   Sort Key: "*SELECT* 1".track_id
+                                                   Sort Method: quicksort  Memory: 210kB
+                                                   Buffers: shared hit=4200
+                                                   Worker 0:  Sort Method: quicksort  Memory: 151kB
+                                                   Worker 1:  Sort Method: quicksort  Memory: 210kB
+                                                   ->  Partial HashAggregate  (cost=8829.12..8831.12 rows=200 width=32) (actual time=41.276..41.598 rows=2006 loops=3)
+                                                         Group Key: "*SELECT* 1".track_id
+                                                         Batches: 1  Memory Usage: 385kB
+                                                         Buffers: shared hit=4186
+                                                         Worker 0:  Batches: 1  Memory Usage: 385kB
+                                                         Worker 1:  Batches: 1  Memory Usage: 385kB
+                                                         ->  Parallel Append  (cost=0.00..8266.65 rows=74996 width=24) (actual time=0.010..28.648 rows=59997 loops=3)
+                                                               Buffers: shared hit=4186
+                                                               ->  Subquery Scan on "*SELECT* 1"  (cost=0.00..3945.83 rows=52938 width=24) (actual time=0.008..12.447 rows=29998 loops=3)
+                                                                     Buffers: shared hit=2093
+                                                                     ->  Parallel Seq Scan on votes  (cost=0.00..3416.45 rows=52938 width=25) (actual time=0.007..9.533 rows=29998 loops=3)
+                                                                           Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                                                                           Buffers: shared hit=2093
+                                                               ->  Subquery Scan on "*SELECT* 2"  (cost=0.00..3945.83 rows=52938 width=24) (actual time=0.009..18.069 rows=44998 loops=2)
+                                                                     Buffers: shared hit=2093
+                                                                     ->  Parallel Seq Scan on votes votes_1  (cost=0.00..3416.45 rows=52938 width=25) (actual time=0.009..14.001 rows=44998 loops=2)
+                                                                           Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                                                                           Buffers: shared hit=2093
+               ->  Hash  (cost=6266.77..6266.77 rows=200 width=32) (actual time=50.360..50.437 rows=2200 loops=1)
+                     Buckets: 4096 (originally 1024)  Batches: 1 (originally 1)  Memory Usage: 170kB
+                     Buffers: shared hit=2694
+                     ->  Subquery Scan on s  (cost=6213.10..6266.77 rows=200 width=32) (actual time=42.263..49.538 rows=2200 loops=1)
+                           Buffers: shared hit=2694
+                           ->  Finalize GroupAggregate  (cost=6213.10..6264.77 rows=200 width=32) (actual time=42.261..49.264 rows=2200 loops=1)
+                                 Group Key: seen_pairs.track_low
+                                 Buffers: shared hit=2694
+                                 ->  Gather Merge  (cost=6213.10..6259.77 rows=400 width=32) (actual time=42.251..47.289 rows=5644 loops=1)
+                                       Workers Planned: 2
+                                       Workers Launched: 2
+                                       Buffers: shared hit=2694
+                                       ->  Sort  (cost=5213.08..5213.58 rows=200 width=32) (actual time=34.914..35.928 rows=1881 loops=3)
+                                             Sort Key: seen_pairs.track_low
+                                             Sort Method: quicksort  Memory: 213kB
+                                             Buffers: shared hit=2694
+                                             Worker 0:  Sort Method: quicksort  Memory: 210kB
+                                             Worker 1:  Sort Method: quicksort  Memory: 127kB
+                                             ->  Partial HashAggregate  (cost=5203.43..5205.43 rows=200 width=32) (actual time=33.087..33.758 rows=1881 loops=3)
+                                                   Group Key: seen_pairs.track_low
+                                                   Batches: 1  Memory Usage: 385kB
+                                                   Buffers: shared hit=2680
+                                                   Worker 0:  Batches: 1  Memory Usage: 385kB
+                                                   Worker 1:  Batches: 1  Memory Usage: 209kB
+                                                   ->  Parallel Append  (cost=0.00..4575.65 rows=83704 width=24) (actual time=0.014..17.728 rows=66963 loops=3)
+                                                         Buffers: shared hit=2680
+                                                         ->  Parallel Seq Scan on seen_pairs  (cost=0.00..2078.57 rows=59085 width=24) (actual time=0.009..6.440 rows=33482 loops=3)
+                                                               Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                                                               Buffers: shared hit=1340
+                                                         ->  Parallel Seq Scan on seen_pairs seen_pairs_1  (cost=0.00..2078.57 rows=59085 width=24) (actual time=0.011..9.431 rows=50222 loops=2)
+                                                               Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                                                               Buffers: shared hit=1340
+ Planning:
+   Buffers: shared hit=11
+ Planning Time: 0.465 ms
+ Execution Time: 108.617 ms
+(93 rows)
+
+=== ledger load (song timelines)
+                                                                          QUERY PLAN                                                                          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Incremental Sort  (cost=1.53..10111.82 rows=89995 width=80) (actual time=0.295..78.335 rows=89995 loops=1)
+   Sort Key: created_at, seq
+   Presorted Key: created_at
+   Full-sort Groups: 753  Sort Method: quicksort  Average Memory: 28kB  Peak Memory: 28kB
+   Pre-sorted Groups: 5438  Sort Method: quicksort  Average Memory: 25kB  Peak Memory: 25kB
+   Buffers: shared hit=90381
+   ->  Index Scan Backward using votes_playlist_created_idx on votes  (cost=0.29..7200.95 rows=89995 width=80) (actual time=0.087..48.770 rows=89995 loops=1)
+         Index Cond: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+         Buffers: shared hit=90378
+ Planning:
+   Buffers: shared hit=5
+ Planning Time: 0.294 ms
+ Execution Time: 85.358 ms
+(13 rows)
+
+=== song summary
+                                                                                                      QUERY PLAN                                                                                                      
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=3789.56..3789.57 rows=1 width=64) (actual time=7.279..7.280 rows=1 loops=1)
+   Buffers: shared hit=1418
+   ->  Nested Loop Left Join  (cost=0.42..3778.89 rows=82 width=80) (actual time=0.058..7.193 rows=19 loops=1)
+         Buffers: shared hit=1413
+         ->  Seq Scan on seen_pairs sp  (cost=0.00..3097.79 rows=82 width=72) (actual time=0.041..7.074 rows=19 loops=1)
+               Filter: ((playlist_id = '00000000-0000-0000-0000-000000000001'::uuid) AND ((track_low = '7def6ee6-c9c3-47c9-8bd6-ddcf91a43077'::uuid) OR (track_high = '7def6ee6-c9c3-47c9-8bd6-ddcf91a43077'::uuid)))
+               Rows Removed by Filter: 100426
+               Buffers: shared hit=1340
+         ->  Index Scan using votes_user_id_playlist_id_track_low_track_high_key on votes v  (cost=0.42..8.30 rows=1 width=120) (actual time=0.005..0.005 rows=1 loops=19)
+               Index Cond: ((user_id = sp.user_id) AND (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid) AND (track_low = sp.track_low) AND (track_high = sp.track_high))
+               Buffers: shared hit=73
+ Planning:
+   Buffers: shared hit=28
+ Planning Time: 0.604 ms
+ Execution Time: 7.356 ms
+(15 rows)
+
+=== song rating series
+                                                                                                         QUERY PLAN                                                                                                         
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=3888.73..3888.91 rows=72 width=51) (actual time=8.691..8.695 rows=16 loops=1)
+   Buffers: shared hit=2261
+   ->  Sort  (cost=3888.73..3888.91 rows=72 width=51) (actual time=8.691..8.694 rows=16 loops=1)
+         Sort Key: v.created_at, v.seq
+         Sort Method: quicksort  Memory: 27kB
+         Buffers: shared hit=2261
+         ->  Hash Join  (cost=217.50..3886.51 rows=72 width=51) (actual time=0.775..8.674 rows=16 loops=1)
+               Hash Cond: (CASE WHEN (v.track_low = '7def6ee6-c9c3-47c9-8bd6-ddcf91a43077'::uuid) THEN v.track_high ELSE v.track_low END = opp.id)
+               Buffers: shared hit=2261
+               ->  Seq Scan on votes v  (cost=0.00..3667.91 rows=72 width=96) (actual time=0.047..7.935 rows=16 loops=1)
+                     Filter: ((playlist_id = '00000000-0000-0000-0000-000000000001'::uuid) AND ((track_low = '7def6ee6-c9c3-47c9-8bd6-ddcf91a43077'::uuid) OR (track_high = '7def6ee6-c9c3-47c9-8bd6-ddcf91a43077'::uuid)))
+                     Rows Removed by Filter: 89979
+                     Buffers: shared hit=2093
+               ->  Hash  (cost=190.00..190.00 rows=2200 width=26) (actual time=0.704..0.705 rows=2200 loops=1)
+                     Buckets: 4096  Batches: 1  Memory Usage: 157kB
+                     Buffers: shared hit=168
+                     ->  Seq Scan on tracks opp  (cost=0.00..190.00 rows=2200 width=26) (actual time=0.003..0.319 rows=2200 loops=1)
+                           Buffers: shared hit=168
+ Planning Time: 0.162 ms
+ Execution Time: 8.781 ms
+(20 rows)
+
+=== pairing appearances
+                                                                             QUERY PLAN                                                                             
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Finalize GroupAggregate  (cost=6256.50..6307.17 rows=200 width=24) (actual time=13.892..17.035 rows=2198 loops=1)
+   Group Key: seen_pairs.track_low
+   Buffers: shared hit=2694
+   ->  Gather Merge  (cost=6256.50..6303.17 rows=400 width=24) (actual time=13.888..16.516 rows=3933 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         Buffers: shared hit=2694
+         ->  Sort  (cost=5256.48..5256.98 rows=200 width=24) (actual time=10.480..10.529 rows=1311 loops=3)
+               Sort Key: seen_pairs.track_low
+               Sort Method: quicksort  Memory: 134kB
+               Buffers: shared hit=2694
+               Worker 0:  Sort Method: quicksort  Memory: 43kB
+               Worker 1:  Sort Method: quicksort  Memory: 130kB
+               ->  Partial HashAggregate  (cost=5246.83..5248.83 rows=200 width=24) (actual time=10.023..10.152 rows=1311 loops=3)
+                     Group Key: seen_pairs.track_low
+                     Batches: 1  Memory Usage: 209kB
+                     Buffers: shared hit=2680
+                     Worker 0:  Batches: 1  Memory Usage: 77kB
+                     Worker 1:  Batches: 1  Memory Usage: 209kB
+                     ->  Parallel Append  (cost=0.00..5145.12 rows=20342 width=16) (actual time=0.012..7.704 rows=16963 loops=3)
+                           Buffers: shared hit=2680
+                           ->  Parallel Seq Scan on seen_pairs  (cost=0.00..2521.71 rows=14359 width=16) (actual time=0.007..3.396 rows=8482 loops=3)
+                                 Filter: ((playlist_id = '00000000-0000-0000-0000-000000000001'::uuid) AND (seen_at >= (now() - '24:00:00'::interval)))
+                                 Rows Removed by Filter: 25000
+                                 Buffers: shared hit=1340
+                           ->  Parallel Seq Scan on seen_pairs seen_pairs_1  (cost=0.00..2521.71 rows=14359 width=16) (actual time=0.009..5.126 rows=12722 loops=2)
+                                 Filter: ((playlist_id = '00000000-0000-0000-0000-000000000001'::uuid) AND (seen_at >= (now() - '24:00:00'::interval)))
+                                 Rows Removed by Filter: 37500
+                                 Buffers: shared hit=1340
+ Planning:
+   Buffers: shared hit=3
+ Planning Time: 0.141 ms
+ Execution Time: 17.209 ms
+(33 rows)
+
+=== pairing lookback vote appearances
+                                                                       QUERY PLAN                                                                        
+---------------------------------------------------------------------------------------------------------------------------------------------------------
+ HashAggregate  (cost=5249.36..5251.36 rows=200 width=24) (actual time=12.826..12.997 rows=1940 loops=1)
+   Group Key: votes.track_low
+   Batches: 1  Memory Usage: 257kB
+   Buffers: shared hit=4240
+   ->  Append  (cost=207.17..5141.19 rows=21634 width=16) (actual time=0.929..9.050 rows=22500 loops=1)
+         Buffers: shared hit=4240
+         ->  Bitmap Heap Scan on votes  (cost=207.17..2516.51 rows=10817 width=16) (actual time=0.929..4.189 rows=11250 loops=1)
+               Recheck Cond: ((playlist_id = '00000000-0000-0000-0000-000000000001'::uuid) AND (created_at >= (now() - '01:00:00'::interval)))
+               Heap Blocks: exact=2092
+               Buffers: shared hit=2120
+               ->  Bitmap Index Scan on votes_playlist_created_idx  (cost=0.00..204.47 rows=10817 width=0) (actual time=0.698..0.699 rows=11250 loops=1)
+                     Index Cond: ((playlist_id = '00000000-0000-0000-0000-000000000001'::uuid) AND (created_at >= (now() - '01:00:00'::interval)))
+                     Buffers: shared hit=28
+         ->  Bitmap Heap Scan on votes votes_1  (cost=207.17..2516.51 rows=10817 width=16) (actual time=0.927..3.666 rows=11250 loops=1)
+               Recheck Cond: ((playlist_id = '00000000-0000-0000-0000-000000000001'::uuid) AND (created_at >= (now() - '01:00:00'::interval)))
+               Heap Blocks: exact=2092
+               Buffers: shared hit=2120
+               ->  Bitmap Index Scan on votes_playlist_created_idx  (cost=0.00..204.47 rows=10817 width=0) (actual time=0.698..0.698 rows=11250 loops=1)
+                     Index Cond: ((playlist_id = '00000000-0000-0000-0000-000000000001'::uuid) AND (created_at >= (now() - '01:00:00'::interval)))
+                     Buffers: shared hit=28
+ Planning Time: 0.148 ms
+ Execution Time: 13.193 ms
+(22 rows)
+
+=== pairing quality pairs
+                                                                   QUERY PLAN                                                                   
+------------------------------------------------------------------------------------------------------------------------------------------------
+ Seq Scan on seen_pairs  (cost=0.00..3851.12 rows=24403 width=32) (actual time=0.010..8.983 rows=25445 loops=1)
+   Filter: ((playlist_id = '00000000-0000-0000-0000-000000000001'::uuid) AND (seen_at < now()) AND (seen_at >= (now() - '24:00:00'::interval)))
+   Rows Removed by Filter: 75000
+   Buffers: shared hit=1340
+ Planning Time: 0.122 ms
+ Execution Time: 9.677 ms
+(6 rows)
+
+=== progress counts
+                                                                               QUERY PLAN                                                                               
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Result  (cost=15249.86..15249.87 rows=1 width=40) (actual time=74.955..74.959 rows=1 loops=1)
+   Buffers: shared hit=4412
+   InitPlan 1 (returns $0)
+     ->  Aggregate  (cost=2846.68..2846.69 rows=1 width=8) (actual time=11.901..11.902 rows=1 loops=1)
+           Buffers: shared hit=1340
+           ->  Seq Scan on seen_pairs  (cost=0.00..2595.56 rows=100445 width=0) (actual time=0.007..8.051 rows=100445 loops=1)
+                 Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                 Buffers: shared hit=1340
+   InitPlan 2 (returns $1)
+     ->  Aggregate  (cost=2584.19..2584.20 rows=1 width=8) (actual time=11.731..11.731 rows=1 loops=1)
+           Buffers: shared hit=196
+           ->  Index Only Scan using votes_playlist_created_idx on votes  (cost=0.29..2359.21 rows=89995 width=0) (actual time=0.040..7.299 rows=89995 loops=1)
+                 Index Cond: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                 Heap Fetches: 0
+                 Buffers: shared hit=196
+   InitPlan 3 (returns $2)
+     ->  Aggregate  (cost=3409.93..3409.94 rows=1 width=8) (actual time=10.088..10.089 rows=1 loops=1)
+           Buffers: shared hit=1340
+           ->  Seq Scan on seen_pairs seen_pairs_1  (cost=0.00..3348.90 rows=24410 width=0) (actual time=0.015..8.970 rows=25445 loops=1)
+                 Filter: ((playlist_id = '00000000-0000-0000-0000-000000000001'::uuid) AND (seen_at >= (now() - '24:00:00'::interval)))
+                 Rows Removed by Filter: 75000
+                 Buffers: shared hit=1340
+   InitPlan 4 (returns $3)
+     ->  Aggregate  (cost=3599.99..3600.00 rows=1 width=8) (actual time=30.371..30.372 rows=1 loops=1)
+           Buffers: shared hit=1340
+           ->  Seq Scan on seen_pairs seen_pairs_2  (cost=0.00..3348.90 rows=100437 width=0) (actual time=0.009..25.208 rows=100445 loops=1)
+                 Filter: ((playlist_id = '00000000-0000-0000-0000-000000000001'::uuid) AND (seen_at >= (now() - '7 days'::interval)))
+                 Buffers: shared hit=1340
+   InitPlan 5 (returns $4)
+     ->  Aggregate  (cost=2809.03..2809.04 rows=1 width=8) (actual time=10.847..10.848 rows=1 loops=1)
+           Buffers: shared hit=196
+           ->  Index Only Scan using votes_playlist_created_idx on votes votes_1  (cost=0.30..2584.06 rows=89988 width=0) (actual time=0.036..6.898 rows=89995 loops=1)
+                 Index Cond: ((playlist_id = '00000000-0000-0000-0000-000000000001'::uuid) AND (created_at >= (now() - '7 days'::interval)))
+                 Heap Fetches: 0
+                 Buffers: shared hit=196
+ Planning Time: 0.273 ms
+ Execution Time: 75.076 ms
+(37 rows)
+
+=== song insights most no-voted
+                                                                                         QUERY PLAN                                                                                          
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=13708.38..13708.41 rows=10 width=80) (actual time=72.715..72.866 rows=10 loops=1)
+   Buffers: shared hit=13494
+   ->  Sort  (cost=13708.38..13708.55 rows=67 width=80) (actual time=72.714..72.864 rows=10 loops=1)
+         Sort Key: (((((count(*)) - COALESCE((count(*)), '0'::bigint)))::double precision / ((count(*)))::double precision)) DESC, (count(*)) DESC
+         Sort Method: top-N heapsort  Memory: 27kB
+         Buffers: shared hit=13494
+         ->  Merge Left Join  (cost=13273.20..13706.94 rows=67 width=80) (actual time=62.546..72.224 rows=2200 loops=1)
+               Merge Cond: (t.id = votes.track_low)
+               Buffers: shared hit=13494
+               ->  Nested Loop  (cost=6004.12..6383.78 rows=67 width=72) (actual time=31.314..37.664 rows=2200 loops=1)
+                     Buffers: shared hit=9294
+                     ->  Finalize GroupAggregate  (cost=6003.84..6055.01 rows=67 width=24) (actual time=31.290..33.955 rows=2200 loops=1)
+                           Group Key: seen_pairs.track_low
+                           Filter: (count(*) >= 10)
+                           Buffers: shared hit=2694
+                           ->  Gather Merge  (cost=6003.84..6050.51 rows=400 width=24) (actual time=31.285..32.723 rows=6140 loops=1)
+                                 Workers Planned: 2
+                                 Workers Launched: 2
+                                 Buffers: shared hit=2694
+                                 ->  Sort  (cost=5003.82..5004.32 rows=200 width=24) (actual time=27.548..27.702 rows=2047 loops=3)
+                                       Sort Key: seen_pairs.track_low
+                                       Sort Method: quicksort  Memory: 195kB
+                                       Buffers: shared hit=2694
+                                       Worker 0:  Sort Method: quicksort  Memory: 140kB
+                                       Worker 1:  Sort Method: quicksort  Memory: 194kB
+                                       ->  Partial HashAggregate  (cost=4994.17..4996.17 rows=200 width=24) (actual time=26.881..27.060 rows=2047 loops=3)
+                                             Group Key: seen_pairs.track_low
+                                             Batches: 1  Memory Usage: 385kB
+                                             Buffers: shared hit=2680
+                                             Worker 0:  Batches: 1  Memory Usage: 257kB
+                                             Worker 1:  Batches: 1  Memory Usage: 385kB
+                                             ->  Parallel Append  (cost=0.00..4575.65 rows=83704 width=16) (actual time=0.008..15.406 rows=66963 loops=3)
+                                                   Buffers: shared hit=2680
+                                                   ->  Parallel Seq Scan on seen_pairs  (cost=0.00..2078.57 rows=59085 width=16) (actual time=0.004..4.076 rows=33482 loops=3)
+                                                         Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                                                         Buffers: shared hit=1340
+                                                   ->  Parallel Seq Scan on seen_pairs seen_pairs_1  (cost=0.00..2078.57 rows=59085 width=16) (actual time=0.007..10.392 rows=50222 loops=2)
+                                                         Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                                                         Buffers: shared hit=1340
+                     ->  Index Scan using tracks_pkey on tracks t  (cost=0.28..4.90 rows=1 width=64) (actual time=0.001..0.001 rows=1 loops=2200)
+                           Index Cond: (id = seen_pairs.track_low)
+                           Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                           Buffers: shared hit=6600
+               ->  Finalize GroupAggregate  (cost=7269.08..7319.75 rows=200 width=24) (actual time=31.227..33.715 rows=2200 loops=1)
+                     Group Key: votes.track_low
+                     Buffers: shared hit=4200
+                     ->  Gather Merge  (cost=7269.08..7315.75 rows=400 width=24) (actual time=31.221..32.568 rows=5947 loops=1)
+                           Workers Planned: 2
+                           Workers Launched: 2
+                           Buffers: shared hit=4200
+                           ->  Sort  (cost=6269.06..6269.56 rows=200 width=24) (actual time=27.191..27.323 rows=1982 loops=3)
+                                 Sort Key: votes.track_low
+                                 Sort Method: quicksort  Memory: 194kB
+                                 Buffers: shared hit=4200
+                                 Worker 0:  Sort Method: quicksort  Memory: 133kB
+                                 Worker 1:  Sort Method: quicksort  Memory: 193kB
+                                 ->  Partial HashAggregate  (cost=6259.42..6261.42 rows=200 width=24) (actual time=26.257..26.534 rows=1982 loops=3)
+                                       Group Key: votes.track_low
+                                       Batches: 1  Memory Usage: 385kB
+                                       Buffers: shared hit=4186
+                                       Worker 0:  Batches: 1  Memory Usage: 209kB
+                                       Worker 1:  Batches: 1  Memory Usage: 385kB
+                                       ->  Parallel Append  (cost=0.00..5884.44 rows=74996 width=16) (actual time=0.006..15.406 rows=59997 loops=3)
+                                             Buffers: shared hit=4186
+                                             ->  Parallel Seq Scan on votes  (cost=0.00..2754.73 rows=52938 width=16) (actual time=0.004..4.276 rows=29998 loops=3)
+                                                   Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                                                   Buffers: shared hit=2093
+                                             ->  Parallel Seq Scan on votes votes_1  (cost=0.00..2754.73 rows=52938 width=16) (actual time=0.005..10.508 rows=44998 loops=2)
+                                                   Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                                                   Buffers: shared hit=2093
+ Planning:
+   Buffers: shared hit=4
+ Planning Time: 0.350 ms
+ Execution Time: 73.221 ms
+(74 rows)
+
+=== vote quality aggregate
+                                                                  QUERY PLAN                                                                   
+-----------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=10076.99..10077.00 rows=1 width=72) (actual time=226.726..228.733 rows=1 loops=1)
+   Buffers: shared hit=4834
+   InitPlan 1 (returns $0)
+     ->  Aggregate  (cost=2846.68..2846.69 rows=1 width=8) (actual time=11.672..11.672 rows=1 loops=1)
+           Buffers: shared hit=1340
+           ->  Seq Scan on seen_pairs  (cost=0.00..2595.56 rows=100445 width=0) (actual time=0.016..7.880 rows=100445 loops=1)
+                 Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                 Buffers: shared hit=1340
+   ->  Gather  (cost=4681.14..7227.90 rows=29 width=81) (actual time=33.832..43.072 rows=89995 loops=1)
+         Workers Planned: 1
+         Workers Launched: 1
+         Buffers: shared hit=3494
+         ->  Parallel Hash Join  (cost=3681.14..6225.00 rows=17 width=81) (actual time=31.319..58.024 rows=44998 loops=2)
+               Hash Cond: ((sp.user_id = v.user_id) AND (sp.track_low = v.track_low) AND (sp.track_high = v.track_high))
+               Buffers: shared hit=3494
+               ->  Parallel Seq Scan on seen_pairs sp  (cost=0.00..2078.57 rows=59085 width=73) (actual time=0.007..9.048 rows=50222 loops=2)
+                     Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                     Buffers: shared hit=1340
+               ->  Parallel Hash  (cost=2754.73..2754.73 rows=52938 width=104) (actual time=30.654..30.654 rows=44998 loops=2)
+                     Buckets: 131072  Batches: 1  Memory Usage: 13056kB
+                     Buffers: shared hit=2093
+                     ->  Parallel Seq Scan on votes v  (cost=0.00..2754.73 rows=52938 width=104) (actual time=0.018..9.229 rows=44998 loops=2)
+                           Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                           Buffers: shared hit=2093
+ Planning:
+   Buffers: shared hit=16
+ Planning Time: 0.540 ms
+ Execution Time: 228.944 ms
+(28 rows)
+
+=== vote quality heatmap
+                                                                                             QUERY PLAN                                                                                              
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Finalize GroupAggregate  (cost=7225.62..7228.98 rows=29 width=16) (actual time=91.785..98.527 rows=16 loops=1)
+   Group Key: ((EXTRACT(dow FROM (sp.seen_at AT TIME ZONE 'Europe/Amsterdam'::text)))::integer), ((EXTRACT(hour FROM (sp.seen_at AT TIME ZONE 'Europe/Amsterdam'::text)))::integer)
+   Buffers: shared hit=3483
+   ->  Gather Merge  (cost=7225.62..7228.12 rows=17 width=16) (actual time=91.672..98.512 rows=32 loops=1)
+         Workers Planned: 1
+         Workers Launched: 1
+         Buffers: shared hit=3483
+         ->  Partial GroupAggregate  (cost=6225.61..6226.20 rows=17 width=16) (actual time=85.429..89.713 rows=16 loops=2)
+               Group Key: ((EXTRACT(dow FROM (sp.seen_at AT TIME ZONE 'Europe/Amsterdam'::text)))::integer), ((EXTRACT(hour FROM (sp.seen_at AT TIME ZONE 'Europe/Amsterdam'::text)))::integer)
+               Buffers: shared hit=3483
+               ->  Sort  (cost=6225.61..6225.65 rows=17 width=8) (actual time=84.925..86.805 rows=44998 loops=2)
+                     Sort Key: ((EXTRACT(dow FROM (sp.seen_at AT TIME ZONE 'Europe/Amsterdam'::text)))::integer), ((EXTRACT(hour FROM (sp.seen_at AT TIME ZONE 'Europe/Amsterdam'::text)))::integer)
+                     Sort Method: quicksort  Memory: 3069kB
+                     Buffers: shared hit=3483
+                     Worker 0:  Sort Method: quicksort  Memory: 2816kB
+                     ->  Parallel Hash Join  (cost=3681.14..6225.26 rows=17 width=8) (actual time=20.957..77.480 rows=44998 loops=2)
+                           Hash Cond: ((sp.user_id = v.user_id) AND (sp.track_low = v.track_low) AND (sp.track_high = v.track_high))
+                           Buffers: shared hit=3447
+                           ->  Parallel Seq Scan on seen_pairs sp  (cost=0.00..2078.57 rows=59085 width=72) (actual time=0.007..7.584 rows=50222 loops=2)
+                                 Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                                 Buffers: shared hit=1340
+                           ->  Parallel Hash  (cost=2754.73..2754.73 rows=52938 width=64) (actual time=20.310..20.310 rows=44998 loops=2)
+                                 Buckets: 131072  Batches: 1  Memory Usage: 9504kB
+                                 Buffers: shared hit=2093
+                                 ->  Parallel Seq Scan on votes v  (cost=0.00..2754.73 rows=52938 width=64) (actual time=0.009..7.224 rows=44998 loops=2)
+                                       Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                                       Buffers: shared hit=2093
+ Planning:
+   Buffers: shared hit=20
+ Planning Time: 0.518 ms
+ Execution Time: 98.805 ms
+(31 rows)
+
+=== voter observations (all voters)
+                                                                  QUERY PLAN                                                                  
+----------------------------------------------------------------------------------------------------------------------------------------------
+ Gather Merge  (cost=14735.65..21530.42 rows=59085 width=81) (actual time=90.206..114.011 rows=100445 loops=1)
+   Workers Planned: 1
+   Workers Launched: 1
+   Buffers: shared hit=3524, temp read=1090 written=1092
+   ->  Sort  (cost=13735.64..13883.35 rows=59085 width=81) (actual time=85.920..91.248 rows=50222 loops=2)
+         Sort Key: sp.user_id, sp.seen_at
+         Sort Method: external merge  Disk: 4792kB
+         Buffers: shared hit=3524, temp read=1090 written=1092
+         Worker 0:  Sort Method: external merge  Disk: 3928kB
+         ->  Parallel Hash Left Join  (cost=3681.14..6225.00 rows=59085 width=81) (actual time=25.302..48.911 rows=50222 loops=2)
+               Hash Cond: ((sp.user_id = v.user_id) AND (sp.track_low = v.track_low) AND (sp.track_high = v.track_high))
+               Buffers: shared hit=3480
+               ->  Parallel Seq Scan on seen_pairs sp  (cost=0.00..2078.57 rows=59085 width=73) (actual time=0.007..7.984 rows=50222 loops=2)
+                     Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                     Buffers: shared hit=1340
+               ->  Parallel Hash  (cost=2754.73..2754.73 rows=52938 width=88) (actual time=24.792..24.793 rows=44998 loops=2)
+                     Buckets: 131072  Batches: 1  Memory Usage: 11616kB
+                     Buffers: shared hit=2093
+                     ->  Parallel Seq Scan on votes v  (cost=0.00..2754.73 rows=52938 width=88) (actual time=0.009..8.259 rows=44998 loops=2)
+                           Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+                           Buffers: shared hit=2093
+ Planning:
+   Buffers: shared hit=16
+ Planning Time: 0.427 ms
+ Execution Time: 117.367 ms
+(25 rows)
+
+=== voter detail observations
+                                                                            QUERY PLAN                                                                             
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=1875.06..1876.06 rows=400 width=81) (actual time=0.468..0.483 rows=400 loops=1)
+   Sort Key: sp.seen_at
+   Sort Method: quicksort  Memory: 67kB
+   Buffers: shared hit=29
+   ->  Hash Right Join  (cost=921.39..1857.77 rows=400 width=81) (actual time=0.238..0.363 rows=400 loops=1)
+         Hash Cond: ((v.track_low = sp.track_low) AND (v.track_high = sp.track_high))
+         Buffers: shared hit=29
+         ->  Bitmap Heap Scan on votes v  (cost=15.20..949.69 rows=359 width=88) (actual time=0.039..0.081 rows=360 loops=1)
+               Recheck Cond: (user_id = 'f9d44767-f542-4e2a-ae4e-4d30bb16810e'::uuid)
+               Filter: (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid)
+               Heap Blocks: exact=9
+               Buffers: shared hit=14
+               ->  Bitmap Index Scan on votes_user_created_idx  (cost=0.00..15.11 rows=359 width=0) (actual time=0.034..0.034 rows=360 loops=1)
+                     Index Cond: (user_id = 'f9d44767-f542-4e2a-ae4e-4d30bb16810e'::uuid)
+                     Buffers: shared hit=5
+         ->  Hash  (cost=900.19..900.19 rows=400 width=73) (actual time=0.194..0.195 rows=400 loops=1)
+               Buckets: 1024  Batches: 1  Memory Usage: 50kB
+               Buffers: shared hit=15
+               ->  Bitmap Heap Scan on seen_pairs sp  (cost=32.52..900.19 rows=400 width=73) (actual time=0.056..0.099 rows=400 loops=1)
+                     Recheck Cond: ((user_id = 'f9d44767-f542-4e2a-ae4e-4d30bb16810e'::uuid) AND (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid))
+                     Heap Blocks: exact=6
+                     Buffers: shared hit=15
+                     ->  Bitmap Index Scan on seen_pairs_history_idx  (cost=0.00..32.42 rows=400 width=0) (actual time=0.049..0.049 rows=400 loops=1)
+                           Index Cond: ((user_id = 'f9d44767-f542-4e2a-ae4e-4d30bb16810e'::uuid) AND (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid))
+                           Buffers: shared hit=9
+ Planning Time: 0.355 ms
+ Execution Time: 0.618 ms
+(27 rows)
+
+=== voter heatmap
+                                                                                QUERY PLAN                                                                                
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ HashAggregate  (cost=53.41..62.61 rows=368 width=16) (actual time=0.599..0.602 rows=16 loops=1)
+   Group Key: (EXTRACT(dow FROM (seen_at AT TIME ZONE 'Europe/Amsterdam'::text)))::integer, (EXTRACT(hour FROM (seen_at AT TIME ZONE 'Europe/Amsterdam'::text)))::integer
+   Batches: 1  Memory Usage: 37kB
+   Buffers: shared hit=10
+   ->  Index Only Scan using seen_pairs_history_idx on seen_pairs  (cost=0.42..50.41 rows=400 width=8) (actual time=0.031..0.523 rows=400 loops=1)
+         Index Cond: ((user_id = 'f9d44767-f542-4e2a-ae4e-4d30bb16810e'::uuid) AND (playlist_id = '00000000-0000-0000-0000-000000000001'::uuid))
+         Heap Fetches: 0
+         Buffers: shared hit=10
+ Planning Time: 0.093 ms
+ Execution Time: 0.660 ms
+(10 rows)
+

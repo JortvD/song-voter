@@ -99,9 +99,19 @@ docker compose logs -f backend
 | `POST` | `/api/admin/reset/all` | admin | Hard reset everything except the current admin; requires `{"confirm":"RESET EVERYTHING"}` |
 | `GET` | `/api/admin/chart.csv` | admin | Download the official standings as CSV |
 | `GET` | `/api/admin/stats` | admin | Dashboard counters + 14-day activity |
-| `GET` | `/api/admin/settings` | admin | App-wide league settings |
-| `PATCH` | `/api/admin/settings` | admin | Update the daily streak goal (`daily_streak_goal`, 1–100) |
+| `GET` | `/api/admin/settings` | admin | App-wide league, live-pairing and statistics settings |
+| `PATCH` | `/api/admin/settings` | admin | Update any settings field; values are clamped to documented ranges |
 | `GET` | `/api/admin/insights` | admin | Mission-control totals, charts, top tracks, top voters and recent picks (`days`, 1–90) |
+| `GET` | `/api/admin/duels` | admin | Paginated duel feed with no-vote rows, filters and full per-vote detail (`limit`, `offset`, `only`, `sort`, `user`, `q`, `track_id`, `hours`, `from`, `to`) |
+| `GET` | `/api/admin/songs/{id}` | admin | Song deep dive: summary, rank history, rating line and paginated duel history |
+| `GET` | `/api/admin/standings` | admin | Extended standings with 24h rank change, form and no-vote rate (`limit`, `offset`, `q`) |
+| `GET` | `/api/admin/pairing` | admin | Rank-bucket health, settling, bottom share and pairing quality (`hours`, `from`, `lookback_hours`) |
+| `GET` | `/api/admin/progress` | admin | Pace, target progress, reveal forecast and ranking stability |
+| `GET` | `/api/admin/song-insights` | admin | No-vote leaders, preview impact, form tables and distributions |
+| `GET` | `/api/admin/vote-quality` | admin | Global upset/no-vote/decision stats, side bias, flags and a weekday×hour heatmap (`tz`) |
+| `GET` | `/api/admin/voters` | admin | Voter behaviour table with sortable decision, agreement, session and flag metrics (`limit`, `offset`, `q`, `sort`) |
+| `GET` | `/api/admin/voters/{id}` | admin | One voter's histogram, session trend, tiredness curve, sessions and recent duels (`tz`, `duel_limit`) |
+| `GET` | `/api/admin/crowd` | admin | Crowd-level decision, agreement, session and tiredness distributions |
 | `GET` | `/api/admin/users` | admin | Voters with picks, duels and last activity (`limit`, `offset`, `q`, `sort`) |
 | `GET` | `/api/admin/users.csv` | admin | Download every voter and their activity as CSV |
 | `DELETE` | `/api/admin/users/{id}` | admin | Delete a voter, their picks and duels; requires `{"confirm":"<username>"}` |
@@ -340,12 +350,34 @@ the same cream, cobalt and safety-orange visual language as the public site.
 - **Overview** — a live read on the active playlist: total picks, picks today and
   over 7 days, active voters over 24 hours and 7 days, picks per voter, duels per
   voter, song coverage, uncompared tracks, preview gaps, the invite pipeline, a
-  daily picks chart, an hourly picks chart, voter distribution, top tracks, top
-  voters, recent picks and the Liner notes stories. Use the **Today / 7d / 14d /
-  30d / 90d** range buttons to look back, then click any bar in the daily chart to
-  see that day's picks and voters. The Liner notes section includes the story
-  cards plus top-5 leaderboards for divisive/highest-rated albums, artists and
-  decades, one-hit wonders, upsets, coin-flip songs and argued-about duels.
+  daily picks chart, a weekday×hour vote-quality heatmap, voter distribution,
+  top tracks, top voters and the Liner notes stories. It also carries vote
+  quality (upset rate, no-vote rate, decision medians/P90, side bias, flagged
+  vote share), progress and forecast (pace, target progress, reveal projections,
+  ETA), ranking stability (top-100 overlap, risers/fallers, 14-day convergence)
+  and song-level insights (no-vote leaders, preview impact, form tables, never
+  voted songs and distributions). Use the **Today / 7d / 14d / 30d / 90d**
+  range buttons to look back, then click any bar in the daily chart to see that
+  day's picks and voters.
+- **Duels** — every duel shown, newest first, including no-vote rows. Filter by
+  result, voter, song, page size and time window; expand a row for artists,
+  years, ratings before/after, both win chances, rating gap, comparison counts,
+  K and the vote sequence. A no-vote row can be a skip, an undone vote or the
+  duel on screen right now. The biggest-upsets list sorts by the lowest winner
+  win chance in a selectable window.
+- **Duels → song panel** — clicking any song opens its deep dive: current rank
+  and rating, 24h/7d rank change, record, expected wins and form, no-vote rate,
+  upset wins/losses, best win/worst loss, median decision time, a rating-over-time
+  chart and the complete expandable duel history.
+- **Voters** — decision time, no-vote rate, agreement with the current
+  standings, sessions, side bias, flags and activity. Sort every column, use
+  *more columns* for P10/P90, fast-decision share, average session length,
+  voting time and distinct songs, then open a voter for a decision-time
+  histogram, per-session median with a P10–P90 band, within-session tiredness,
+  a sessions table, a local-time heatmap and their recent duels. Flags are
+  informational only and never shown to voters. The crowd panels show
+  decision-time, agreement and session-length distributions plus a crowd-wide
+  tiredness curve.
 - **Playlist** — imports re-sync release dates, albums, artist links and broad
   genres, then queue a background metadata backfill. The panel shows release-year
   and genre coverage plus live track/artist progress, and the backfill can be
@@ -359,11 +391,25 @@ the same cream, cobalt and safety-orange visual language as the public site.
   win counts and the vote ledger stay correct, and clearing a voter's picks also
   resets their coverage so those duels can be served again. The last active admin cannot be deleted or disabled.
 - **Standings** — the complete official standings with score, duels and wins even
-  while The Standings are sealed; search, pagination and CSV export.
+  while The Standings are sealed; search, pagination and CSV export. *More
+  columns* adds 24h rank change, win rate, form (wins minus expected wins) and
+  no-vote rate. Clicking a song opens its deep dive.
+- **Pairing health** — whether rank weighting is on, the effective strength,
+  scale and minimum average, rank-bucket served/target/unweighted shares,
+  comparisons÷weight, evenness now and one lookback ago, settling status, the
+  guarded duels-left forecast with its low-sample warning, bottom-share drift and
+  the rating-gap/same-bucket quality of served pairs.
 - **Playlist** — import or re-sync the Spotify playlist, connect or disconnect
   Spotify, inspect tracks and preview coverage, and fetch missing previews.
 - **The Reveal** — open or seal the public standings, see the live/sealed state,
   and download the official CSV.
+- **Settings** — grouped into **Live pairing** (rank weighting switch, strength,
+  scale, minimum average comparisons, with a confirmation dialog because it
+  changes live duel selection) and **Statistics** (session gap, fast-decision
+  threshold, upset threshold, side-bias margin, low-agreement threshold, minimum
+  votes for flags and target duels per song). Every field shows its default and
+  allowed range, values are clamped server-side, and a reset-to-defaults button
+  restores the documented values. Every change is logged with the admin id.
 - **Invites** — generate invite codes, copy them, see open/used/expired status,
   and revoke unused codes.
 - **Runtime** — backend version, environment, uptime and PostgreSQL readiness.
