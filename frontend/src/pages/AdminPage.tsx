@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import { AdminDangerZone } from '../components/AdminDangerZone'
 import { AdminInvites } from '../components/AdminInvites'
@@ -7,33 +7,61 @@ import { AdminPlaylist } from '../components/AdminPlaylist'
 import { AdminRankingTable } from '../components/AdminRankingTable'
 import { AdminReveal } from '../components/AdminReveal'
 import { AdminSettings } from '../components/admin/AdminSettings'
-import { AdminUsers } from '../components/AdminUsers'
+import { AdminVoters } from '../components/admin/AdminVoters'
 import { RequireAdmin } from '../components/RequireAdmin'
 import { StatusCard } from '../components/StatusCard'
 import { AdminNav } from '../components/admin/AdminNav'
 import type { AdminSection } from '../components/admin/AdminNav'
+import { AdminDuelFeed, BiggestUpsets } from '../components/admin/AdminDuels'
 import { AdminOverview } from '../components/admin/AdminOverview'
+import { AdminPairing } from '../components/admin/AdminPairing'
 import { AdminSectionHeader } from '../components/admin/AdminSectionHeader'
+import { SongDeepDive } from '../components/admin/AdminSongDeepDive'
 import { AdminStatusStrip } from '../components/admin/AdminStatusStrip'
 import { usePlaylist } from '../context/PlaylistContext'
 import { ApiError, api } from '../lib/api'
 import type { AdminInsights } from '../lib/types'
 
-function initialSection(): AdminSection {
-  if (typeof window === 'undefined') return 'overview'
-
-  const params = new URLSearchParams(window.location.search)
-  return params.has('spotify') ? 'playlist' : 'overview'
-}
+const SECTIONS: AdminSection[] = [
+  'overview',
+  'duels',
+  'voters',
+  'standings',
+  'pairing',
+  'playlist',
+  'reveal',
+  'invites',
+  'settings',
+  'runtime',
+  'danger',
+]
 
 function MissionControl() {
   const { refresh: refreshPlaylist } = usePlaylist()
-  const [section, setSection] = useState<AdminSection>(initialSection)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedSection = searchParams.get('section')
+  const section: AdminSection = SECTIONS.includes(requestedSection as AdminSection)
+    ? (requestedSection as AdminSection)
+    : searchParams.has('spotify')
+      ? 'playlist'
+      : 'overview'
+
+  function setSection(next: AdminSection) {
+    if (next === section && !searchParams.has('spotify')) return
+
+    const params = new URLSearchParams(searchParams)
+    params.delete('spotify')
+    params.set('section', next)
+    setSearchParams(params)
+  }
+
   const [insights, setInsights] = useState<AdminInsights | null>(null)
   const [days, setDays] = useState(14)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [songId, setSongId] = useState<string | null>(null)
+  const [actionNotice, setActionNotice] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -71,6 +99,22 @@ function MissionControl() {
         onRefresh={refresh}
       />
 
+      {actionNotice && (
+        <div
+          role="status"
+          className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border-2 border-ok/50 bg-ok/5 px-4 py-3"
+        >
+          <p className="min-w-0 text-sm leading-relaxed text-ink">{actionNotice}</p>
+          <button
+            type="button"
+            onClick={() => setActionNotice(null)}
+            className="pv-admin-button shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
         <AdminNav section={section} onChange={setSection} insights={insights} />
 
@@ -85,7 +129,24 @@ function MissionControl() {
               onDaysChange={setDays}
               onRefresh={refresh}
               onNavigate={setSection}
+              onOpenSong={setSongId}
             />
+          )}
+
+          {section === 'duels' && (
+            <div className="space-y-4">
+              <AdminSectionHeader
+                eyebrow="Every shown duel"
+                title="Duels"
+                description="The newest duels first, including no-vote rows. Filter by voter, song, result or time, then expand a row for ratings, win chances, K, comparison counts and the vote sequence. A no-vote row can be a skip, an undone vote or the duel on screen right now."
+              >
+                <button type="button" onClick={refresh} className="pv-admin-button">
+                  Refresh
+                </button>
+              </AdminSectionHeader>
+              <AdminDuelFeed key={`duels-${refreshKey}`} onOpenSong={setSongId} />
+              <BiggestUpsets onOpenSong={setSongId} />
+            </div>
           )}
 
           {section === 'voters' && (
@@ -93,16 +154,13 @@ function MissionControl() {
               <AdminSectionHeader
                 eyebrow="The room"
                 title="Voters"
-                description="Every account, with picks, duels and last activity. Expand a voter to rename them, reset a password, revoke sessions, clear picks or delete the account. You can also sort, search, or export the whole room."
+                description="Every account with decision-time, agreement and session metrics. Expand a voter to manage the account; click their name for the full detail page. Flags are informational only and never shown to voters."
               >
-                <a href="/api/admin/users.csv" className="pv-admin-button">
-                  Export voters CSV
-                </a>
                 <button type="button" onClick={refresh} className="pv-admin-button">
                   Refresh
                 </button>
               </AdminSectionHeader>
-              <AdminUsers key={`voters-${refreshKey}`} />
+              <AdminVoters key={`voters-${refreshKey}`} />
             </div>
           )}
 
@@ -111,7 +169,7 @@ function MissionControl() {
               <AdminSectionHeader
                 eyebrow="The official list"
                 title="Standings"
-                description="Every track with score, duels and wins, even while The Standings are sealed. Search, page through, or export the official CSV."
+                description="Every track with score, duels and wins, even while The Standings are sealed. Use more columns for 24h rank change, win rate, form and no-vote rate. Click a song for its deep dive."
               >
                 <a href="/api/admin/chart.csv" className="pv-admin-button">
                   Export standings CSV
@@ -120,7 +178,25 @@ function MissionControl() {
                   Public standings
                 </Link>
               </AdminSectionHeader>
-              <AdminRankingTable key={`standings-${refreshKey}`} />
+              <AdminRankingTable
+                key={`standings-${refreshKey}`}
+                onOpenSong={setSongId}
+              />
+            </div>
+          )}
+
+          {section === 'pairing' && (
+            <div className="space-y-4">
+              <AdminSectionHeader
+                eyebrow="The algorithm"
+                title="Pairing health"
+                description="Whether rank-weighted selection is active, how close it is to settling, and the quality of the pairs it serves. Live pairing settings are in Settings."
+              >
+                <button type="button" onClick={refresh} className="pv-admin-button">
+                  Refresh
+                </button>
+              </AdminSectionHeader>
+              <AdminPairing key={`pairing-${refreshKey}`} />
             </div>
           )}
 
@@ -214,6 +290,18 @@ function MissionControl() {
           )}
         </div>
       </div>
+
+      {songId && (
+        <SongDeepDive
+          trackId={songId}
+          onClose={() => setSongId(null)}
+          onRemoved={(message) => {
+            setSongId(null)
+            setActionNotice(message)
+            refresh()
+          }}
+        />
+      )}
     </div>
   )
 }

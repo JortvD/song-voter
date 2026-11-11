@@ -159,7 +159,7 @@ pub async fn load_streak(
     })
 }
 
-async fn resolve_timezone(
+pub(crate) async fn resolve_timezone(
     connection: &mut PgConnection,
     requested: Option<&str>,
 ) -> Result<String, ApiError> {
