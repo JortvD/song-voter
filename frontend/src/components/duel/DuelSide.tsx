@@ -216,6 +216,7 @@ export function DuelSide({
         type="button"
         onClick={onPick}
         disabled={disabled}
+        data-duel-pick={side}
         className="pv-duel-desktop-pick"
       >
         <span aria-hidden="true">{side === 'a' ? '←' : '→'}</span>

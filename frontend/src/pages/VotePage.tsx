@@ -701,8 +701,12 @@ function VoteScreen() {
       }
 
       if (event.code === 'Space' || event.key === ' ') {
-        // Let the focused control handle its own Space activation.
-        if (target?.closest('button, a, [role="button"]')) return
+        // Space is always the preview shortcut. A pick control can keep focus
+        // after a vote, so do not let Space activate it as a second pick.
+        if (!target?.closest('[data-duel-pick]')) {
+          // Let other focused controls handle their own Space activation.
+          if (target?.closest('button, a, [role="button"]')) return
+        }
         event.preventDefault()
         playNext()
         return
