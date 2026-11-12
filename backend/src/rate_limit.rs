@@ -85,6 +85,59 @@ mod tests {
     }
 
     #[test]
+    fn zero_limit_blocks_every_request() {
+        let limiter = RateLimiter::new();
+        let now = Instant::now();
+        assert!(!limiter.allow_at("key", 0, Duration::from_secs(60), now));
+        assert!(!limiter.allow_at("key", 0, Duration::from_secs(60), now));
+    }
+
+    #[test]
+    fn a_fresh_window_starts_from_the_first_request() {
+        let limiter = RateLimiter::new();
+        let now = Instant::now();
+        let window = Duration::from_secs(60);
+
+        assert!(limiter.allow_at("key", 1, window, now));
+        assert!(!limiter.allow_at("key", 1, window, now + Duration::from_secs(59)));
+        assert!(limiter.allow_at("key", 1, window, now + Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn keys_are_case_and_whitespace_sensitive() {
+        let limiter = RateLimiter::new();
+        let now = Instant::now();
+        let window = Duration::from_secs(60);
+        for key in ["ip", "IP", " ip "] {
+            assert!(limiter.allow_at(key, 1, window, now));
+            assert!(!limiter.allow_at(key, 1, window, now));
+        }
+    }
+
+    #[test]
+    fn each_key_uses_its_own_limit_argument() {
+        let limiter = RateLimiter::new();
+        let now = Instant::now();
+        let window = Duration::from_secs(60);
+        assert!(limiter.allow_at("strict", 1, window, now));
+        assert!(limiter.allow_at("loose", 5, window, now));
+        assert!(limiter.allow_at("loose", 5, window, now));
+    }
+
+    #[test]
+    fn expired_buckets_are_pruned_even_for_new_keys() {
+        let limiter = RateLimiter::new();
+        let now = Instant::now();
+        let window = Duration::from_secs(1);
+        for index in 0..4097 {
+            assert!(limiter.allow_at(&format!("ip-{index}"), 10, window, now));
+        }
+        // This request prunes the expired entries before adding its own.
+        assert!(limiter.allow_at("later", 1, window, now + Duration::from_secs(2)));
+        assert!(!limiter.allow_at("later", 1, window, now + Duration::from_secs(2)));
+    }
+
+    #[test]
     fn resets_after_the_window() {
         let limiter = RateLimiter::new();
         let now = Instant::now();

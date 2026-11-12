@@ -645,4 +645,185 @@ mod tests {
         assert!(ranges.stats_target_duels_per_song[0] <= defaults.stats_target_duels_per_song);
         assert!(defaults.stats_target_duels_per_song <= ranges.stats_target_duels_per_song[1]);
     }
+
+    #[test]
+    fn every_default_sits_inside_its_range() {
+        let defaults = SettingsDefaults::current();
+        let ranges = SettingsRanges::current();
+        let pairs = [
+            (
+                defaults.rank_weight_strength,
+                ranges.rank_weight_strength,
+                "rank_weight_strength",
+            ),
+            (
+                defaults.rank_weight_scale,
+                ranges.rank_weight_scale,
+                "rank_weight_scale",
+            ),
+            (
+                defaults.rank_weight_min_avg,
+                ranges.rank_weight_min_avg,
+                "rank_weight_min_avg",
+            ),
+            (
+                defaults.stats_session_gap_minutes as f64,
+                [
+                    ranges.stats_session_gap_minutes[0] as f64,
+                    ranges.stats_session_gap_minutes[1] as f64,
+                ],
+                "stats_session_gap_minutes",
+            ),
+            (
+                defaults.stats_fast_decision_seconds,
+                ranges.stats_fast_decision_seconds,
+                "stats_fast_decision_seconds",
+            ),
+            (
+                defaults.stats_upset_threshold_pct,
+                ranges.stats_upset_threshold_pct,
+                "stats_upset_threshold_pct",
+            ),
+            (
+                defaults.stats_side_bias_margin_pct,
+                ranges.stats_side_bias_margin_pct,
+                "stats_side_bias_margin_pct",
+            ),
+            (
+                defaults.stats_low_agreement_pct,
+                ranges.stats_low_agreement_pct,
+                "stats_low_agreement_pct",
+            ),
+            (
+                defaults.stats_min_votes_for_flags as f64,
+                [
+                    ranges.stats_min_votes_for_flags[0] as f64,
+                    ranges.stats_min_votes_for_flags[1] as f64,
+                ],
+                "stats_min_votes_for_flags",
+            ),
+            (
+                defaults.stats_target_duels_per_song,
+                ranges.stats_target_duels_per_song,
+                "stats_target_duels_per_song",
+            ),
+        ];
+        for (value, range, name) in pairs {
+            assert!(
+                range[0] <= value && value <= range[1],
+                "{name}: {value} outside {range:?}"
+            );
+        }
+        assert!(ranges.daily_streak_goal[0] <= defaults.daily_streak_goal);
+        assert!(defaults.daily_streak_goal <= ranges.daily_streak_goal[1]);
+    }
+
+    #[test]
+    fn parse_f64_trims_whitespace() {
+        assert_eq!(parse_f64(Some(" 123.5 "), 0.0, 0.0, 1000.0), 123.5);
+        assert_eq!(parse_i64(Some("\t42\n"), 0, 0, 1000), 42);
+    }
+
+    #[test]
+    fn parse_f64_handles_signs_and_exponents() {
+        assert_eq!(parse_f64(Some("-2.5"), 0.0, -10.0, 10.0), -2.5);
+        assert_eq!(parse_f64(Some("1e3"), 0.0, 0.0, 5000.0), 1000.0);
+    }
+
+    #[test]
+    fn parse_i64_rejects_overflow_and_decimals() {
+        assert_eq!(parse_i64(Some("9223372036854775808"), 7, 0, 100), 7);
+        assert_eq!(parse_i64(Some("1.0"), 7, 0, 100), 7);
+        assert_eq!(parse_i64(Some("100"), 7, 0, 100), 100);
+    }
+
+    #[test]
+    fn clamped_f64_returns_none_for_missing_values() {
+        assert_eq!(clamped_f64(None, 5.0, 1.0, 10.0), None);
+    }
+
+    #[test]
+    fn clamped_f64_clamps_finite_values_and_replaces_non_finite_ones() {
+        assert_eq!(clamped_f64(Some(-1.0), 5.0, 1.0, 10.0), Some(1.0));
+        assert_eq!(clamped_f64(Some(99.0), 5.0, 1.0, 10.0), Some(10.0));
+        assert_eq!(clamped_f64(Some(f64::NAN), 5.0, 1.0, 10.0), Some(5.0));
+        assert_eq!(clamped_f64(Some(f64::INFINITY), 5.0, 1.0, 10.0), Some(5.0));
+    }
+
+    #[test]
+    fn rank_weighting_accepts_case_insensitive_on_values() {
+        for value in ["ON", "True", "YES", "1", " enabled "] {
+            assert!(parse_rank_weighting(Some(value)), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn stats_session_gap_converts_minutes_to_seconds() {
+        let config = StatsConfig {
+            session_gap_minutes: 15,
+            fast_decision_seconds: 1.5,
+            upset_threshold_pct: 35.0,
+            side_bias_margin_pct: 15.0,
+            low_agreement_pct: 55.0,
+            min_votes_for_flags: 30,
+            target_duels_per_song: 30.0,
+        };
+        assert_eq!(config.session_gap_seconds(), 900);
+    }
+
+    #[test]
+    fn stats_config_reads_each_stored_value() {
+        let values = HashMap::from([
+            (STATS_SESSION_GAP_KEY.to_string(), "20".to_string()),
+            (STATS_FAST_DECISION_KEY.to_string(), "2.0".to_string()),
+            (STATS_UPSET_THRESHOLD_KEY.to_string(), "30".to_string()),
+            (STATS_SIDE_BIAS_MARGIN_KEY.to_string(), "20".to_string()),
+            (STATS_LOW_AGREEMENT_KEY.to_string(), "60".to_string()),
+            (STATS_MIN_VOTES_FOR_FLAGS_KEY.to_string(), "50".to_string()),
+            (STATS_TARGET_DUELS_KEY.to_string(), "45".to_string()),
+        ]);
+        let config = stats_config_from_values(&values);
+        assert_eq!(config.session_gap_minutes, 20);
+        assert_eq!(config.fast_decision_seconds, 2.0);
+        assert_eq!(config.upset_threshold_pct, 30.0);
+        assert_eq!(config.side_bias_margin_pct, 20.0);
+        assert_eq!(config.low_agreement_pct, 60.0);
+        assert_eq!(config.min_votes_for_flags, 50);
+        assert_eq!(config.target_duels_per_song, 45.0);
+    }
+
+    #[test]
+    fn stats_config_defaults_individual_malformed_values() {
+        let values = HashMap::from([
+            (
+                STATS_SESSION_GAP_KEY.to_string(),
+                "not-a-number".to_string(),
+            ),
+            (STATS_FAST_DECISION_KEY.to_string(), "NaN".to_string()),
+        ]);
+        let config = stats_config_from_values(&values);
+        assert_eq!(
+            config.session_gap_minutes,
+            DEFAULT_STATS_SESSION_GAP_MINUTES
+        );
+        assert_eq!(
+            config.fast_decision_seconds,
+            DEFAULT_STATS_FAST_DECISION_SECONDS
+        );
+    }
+
+    #[test]
+    fn live_and_stats_keys_do_not_overlap() {
+        for live in LIVE_KEYS {
+            assert!(!STATS_KEYS.contains(&live), "duplicate setting key {live}");
+        }
+    }
+
+    #[test]
+    fn daily_streak_goal_defaults_are_valid() {
+        let defaults = SettingsDefaults::current();
+        let ranges = SettingsRanges::current();
+        assert!(ranges.daily_streak_goal[0] <= defaults.daily_streak_goal);
+        assert!(defaults.daily_streak_goal <= ranges.daily_streak_goal[1]);
+    }
 }

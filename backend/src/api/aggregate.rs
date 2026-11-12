@@ -369,3 +369,71 @@ pub async fn load_albums(
         entries,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn query(
+        limit: Option<i64>,
+        offset: Option<i64>,
+        q: Option<&str>,
+        genre: Option<&str>,
+    ) -> ChartQuery {
+        ChartQuery {
+            limit,
+            offset,
+            q: q.map(str::to_string),
+            decade: Some(1990),
+            genre: genre.map(str::to_string),
+            artist: Some(uuid::Uuid::from_u128(5)),
+        }
+    }
+
+    #[test]
+    fn parsed_filters_trims_search_and_genre() {
+        let (search, decade, genre, artist) =
+            parsed_filters(&query(None, None, Some("  rock  "), Some("  Pop  ")));
+        assert_eq!(search, "rock");
+        assert_eq!(decade, Some(1990));
+        assert_eq!(genre.as_deref(), Some("Pop"));
+        assert_eq!(artist, Some(uuid::Uuid::from_u128(5)));
+    }
+
+    #[test]
+    fn parsed_filters_drops_an_empty_genre() {
+        let (_, _, genre, _) = parsed_filters(&query(None, None, Some(""), Some("   ")));
+        assert_eq!(genre, None);
+    }
+
+    #[test]
+    fn parsed_filters_keeps_an_empty_search_as_a_string() {
+        let (search, _, _, _) = parsed_filters(&query(None, None, None, None));
+        assert_eq!(search, "");
+    }
+
+    #[test]
+    fn paging_defaults_to_fifty_with_no_offset() {
+        assert_eq!(paging(&query(None, None, None, None)), (50, 0));
+    }
+
+    #[test]
+    fn paging_clamps_the_limit_to_one_and_two_hundred() {
+        assert_eq!(paging(&query(Some(0), None, None, None)).0, 1);
+        assert_eq!(paging(&query(Some(-5), None, None, None)).0, 1);
+        assert_eq!(paging(&query(Some(500), None, None, None)).0, 200);
+        assert_eq!(paging(&query(Some(200), None, None, None)).0, 200);
+        assert_eq!(paging(&query(Some(1), None, None, None)).0, 1);
+    }
+
+    #[test]
+    fn paging_clamps_a_negative_offset_to_zero() {
+        assert_eq!(paging(&query(None, Some(-10), None, None)).1, 0);
+        assert_eq!(paging(&query(None, Some(42), None, None)).1, 42);
+    }
+
+    #[test]
+    fn paging_combines_limit_and_offset() {
+        assert_eq!(paging(&query(Some(25), Some(100), None, None)), (25, 100));
+    }
+}

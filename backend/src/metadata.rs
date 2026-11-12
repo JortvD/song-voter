@@ -423,4 +423,182 @@ mod tests {
         assert_eq!(decade_from_year(1981), 1980);
         assert_eq!(decade_from_year(2000), 2000);
     }
+
+    macro_rules! genre_case {
+        ($name:ident, $input:expr, $expected:expr) => {
+            #[test]
+            fn $name() {
+                assert_eq!(broad_genre($input), $expected);
+            }
+        };
+    }
+
+    genre_case!(maps_soundtrack_keywords, "film score", "Soundtrack");
+    genre_case!(maps_musical_theatre, "musical theatre", "Soundtrack");
+    genre_case!(maps_cinematic_music, "cinematic", "Soundtrack");
+    genre_case!(maps_classical_keywords, "classical", "Classical");
+    genre_case!(maps_orchestral_music, "orchestral", "Classical");
+    genre_case!(maps_opera, "opera", "Classical");
+    genre_case!(maps_chamber_music, "chamber ensemble", "Classical");
+    genre_case!(maps_baroque, "baroque", "Classical");
+    genre_case!(maps_metal, "metal", "Metal/Punk");
+    genre_case!(maps_hardcore_punk, "hardcore punk", "Metal/Punk");
+    genre_case!(maps_punk_rock, "punk rock", "Metal/Punk");
+    genre_case!(maps_grunge, "grunge", "Metal/Punk");
+    genre_case!(maps_emo, "emo", "Metal/Punk");
+    genre_case!(maps_hip_hop, "hip hop", "Hip-Hop/Rap");
+    genre_case!(maps_rap, "rap", "Hip-Hop/Rap");
+    genre_case!(maps_trap, "trap", "Hip-Hop/Rap");
+    genre_case!(maps_drill, "drill", "Hip-Hop/Rap");
+    genre_case!(maps_grime, "grime", "Hip-Hop/Rap");
+    genre_case!(maps_rnb, "r&b", "R&B/Soul");
+    genre_case!(maps_soul, "soul", "R&B/Soul");
+    genre_case!(maps_funk, "funk", "R&B/Soul");
+    genre_case!(maps_motown, "motown", "R&B/Soul");
+    genre_case!(maps_neo_soul, "neo soul", "R&B/Soul");
+    genre_case!(maps_disco, "disco", "R&B/Soul");
+    genre_case!(maps_edm, "edm", "Electronic/Dance");
+    genre_case!(maps_house, "deep house", "Electronic/Dance");
+    genre_case!(maps_techno, "techno", "Electronic/Dance");
+    genre_case!(maps_trance, "trance", "Electronic/Dance");
+    genre_case!(maps_dubstep, "dubstep", "Electronic/Dance");
+    genre_case!(maps_dnb, "dnb", "Electronic/Dance");
+    genre_case!(maps_ambient, "ambient", "Electronic/Dance");
+    genre_case!(maps_idm, "idm", "Electronic/Dance");
+    genre_case!(maps_jazz, "jazz", "Jazz");
+    genre_case!(maps_bebop, "bebop", "Jazz");
+    genre_case!(maps_swing, "swing", "Jazz");
+    genre_case!(maps_blues, "blues", "Jazz");
+    genre_case!(maps_latin, "latin", "Latin");
+    genre_case!(maps_reggaeton, "reggaeton", "Latin");
+    genre_case!(maps_salsa, "salsa", "Latin");
+    genre_case!(maps_cumbia, "cumbia", "Latin");
+    genre_case!(maps_bachata, "bachata", "Latin");
+    genre_case!(maps_merengue, "merengue", "Latin");
+    genre_case!(maps_reggae, "reggae", "World");
+    genre_case!(maps_afrobeat, "afrobeat", "World");
+    genre_case!(maps_celtic, "celtic", "World");
+    genre_case!(maps_amapiano, "amapiano", "World");
+    genre_case!(maps_folk, "folk", "Folk/Country");
+    genre_case!(maps_country, "country", "Folk/Country");
+    genre_case!(maps_americana, "americana", "Folk/Country");
+    genre_case!(maps_bluegrass, "bluegrass", "Folk/Country");
+    genre_case!(maps_acoustic, "acoustic", "Folk/Country");
+    genre_case!(maps_indie_rock, "indie rock", "Indie/Alternative");
+    genre_case!(maps_alternative, "alternative", "Indie/Alternative");
+    genre_case!(maps_shoegaze, "shoegaze", "Indie/Alternative");
+    genre_case!(maps_dream_pop, "dream pop", "Indie/Alternative");
+    genre_case!(maps_lo_fi, "lo-fi beats", "Indie/Alternative");
+    genre_case!(maps_pop, "pop", "Pop");
+    genre_case!(maps_k_pop, "k-pop", "Pop");
+    genre_case!(maps_rock, "rock", "Rock");
+    genre_case!(maps_classic_rock, "classic rock", "Rock");
+    genre_case!(maps_unknown_to_other, "field recordings", "Other");
+    genre_case!(maps_empty_to_other, "", "Other");
+
+    #[test]
+    fn genre_matching_is_case_insensitive_and_trims() {
+        assert_eq!(broad_genre("  INDIE ROCK  "), "Indie/Alternative");
+        assert_eq!(broad_genre("Hip-Hop"), "Hip-Hop/Rap");
+    }
+
+    #[test]
+    fn specific_families_win_over_generic_words() {
+        // "indie folk" must stay folk even though it contains "indie".
+        assert_eq!(broad_genre("indie folk"), "Folk/Country");
+        // "folk rock" must stay folk even though it contains "rock".
+        assert_eq!(broad_genre("folk rock"), "Folk/Country");
+        // "pop punk" is punk, not pop.
+        assert_eq!(broad_genre("pop punk"), "Metal/Punk");
+    }
+
+    #[test]
+    fn every_broad_genre_bucket_is_unique_and_reachable() {
+        let mut seen = std::collections::HashSet::new();
+        for genre in BROAD_GENRES {
+            assert!(seen.insert(*genre), "duplicate bucket {genre}");
+        }
+        assert_eq!(seen.len(), BROAD_GENRES.len());
+        for genre in BROAD_GENRES {
+            let input = genre.to_ascii_lowercase();
+            if input == "other" {
+                assert_eq!(broad_genre("unknown"), "Other");
+            } else {
+                assert_eq!(
+                    broad_genre(&input),
+                    *genre,
+                    "bucket {genre} must map to itself"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn primary_genre_picks_the_most_frequent_bucket() {
+        let genres = vec![
+            "alternative rock".to_string(),
+            "indie rock".to_string(),
+            "pop".to_string(),
+        ];
+        assert_eq!(primary_genre(&genres), Some("Indie/Alternative"));
+    }
+
+    #[test]
+    fn primary_genre_returns_none_for_empty_input() {
+        assert_eq!(primary_genre(&[]), None);
+    }
+
+    #[test]
+    fn primary_genre_uses_input_order_to_break_ties() {
+        let first = vec!["pop".to_string(), "rock".to_string()];
+        let second = vec!["rock".to_string(), "pop".to_string()];
+        assert_eq!(primary_genre(&first), Some("Rock"));
+        assert_eq!(primary_genre(&second), Some("Pop"));
+    }
+
+    #[test]
+    fn primary_genre_collapses_unmapped_genres_into_other() {
+        let genres = vec![
+            "field recordings".to_string(),
+            "spoken word".to_string(),
+            "pop".to_string(),
+        ];
+        assert_eq!(primary_genre(&genres), Some("Other"));
+    }
+
+    #[test]
+    fn primary_genre_handles_one_genre() {
+        assert_eq!(primary_genre(&["jazz".to_string()]), Some("Jazz"));
+    }
+
+    #[test]
+    fn parse_release_year_accepts_boundary_years() {
+        assert_eq!(parse_release_year("1000"), Some(1000));
+        assert_eq!(parse_release_year("3000"), Some(3000));
+        assert_eq!(parse_release_year("0999"), None);
+        assert_eq!(parse_release_year("3001"), None);
+    }
+
+    #[test]
+    fn parse_release_year_rejects_malformed_prefixes() {
+        assert_eq!(parse_release_year(""), None);
+        assert_eq!(parse_release_year("19"), None);
+        assert_eq!(parse_release_year("abcd"), None);
+        assert_eq!(parse_release_year(" 1981"), None);
+        assert_eq!(parse_release_year("+198"), None);
+    }
+
+    #[test]
+    fn parse_release_year_ignores_the_time_part() {
+        assert_eq!(parse_release_year("2024-02-29T12:00:00Z"), Some(2024));
+    }
+
+    #[test]
+    fn decade_from_year_rounds_down_to_the_decade() {
+        assert_eq!(decade_from_year(1999), 1990);
+        assert_eq!(decade_from_year(2000), 2000);
+        assert_eq!(decade_from_year(2009), 2000);
+        assert_eq!(decade_from_year(2010), 2010);
+        assert_eq!(decade_from_year(0), 0);
+    }
 }

@@ -968,4 +968,665 @@ mod tests {
         assert_eq!(tokens.refresh_token.as_deref(), Some("refresh-token"));
         assert_eq!(tokens.expires_in, 3600);
     }
+
+    fn test_client(server: &MockServer) -> SpotifyClient {
+        SpotifyClient::with_bases(
+            "id".to_string(),
+            "secret".to_string(),
+            format!("{}/v1", server.uri()),
+            format!("{}/api", server.uri()),
+        )
+    }
+
+    async fn mock_token(server: &MockServer) {
+        Mock::given(method("POST"))
+            .and(path("/api/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "access_token": "test-token",
+                "expires_in": 3600,
+                "token_type": "Bearer"
+            })))
+            .mount(server)
+            .await;
+    }
+
+    async fn mock_metadata(server: &MockServer, id: &str) {
+        Mock::given(method("GET"))
+            .and(path(format!("/v1/playlists/{id}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": id,
+                "name": "Playlist",
+                "description": null,
+                "images": [],
+                "owner": {"display_name": null}
+            })))
+            .mount(server)
+            .await;
+    }
+
+    #[test]
+    fn parses_playlist_id_from_uri_with_query() {
+        let id = "37i9dQZF1DXcBWIGoYBM5M";
+        assert_eq!(
+            parse_playlist_id(&format!("spotify:playlist:{id}?si=x")).as_deref(),
+            Some(id)
+        );
+    }
+
+    #[test]
+    fn parses_playlist_id_from_url_with_trailing_slash_and_fragment() {
+        let id = "37i9dQZF1DXcBWIGoYBM5M";
+        assert_eq!(
+            parse_playlist_id(&format!(
+                "https://open.spotify.com/playlist/{id}/?si=abc#frag"
+            ))
+            .as_deref(),
+            Some(id)
+        );
+    }
+
+    #[test]
+    fn parse_playlist_id_trims_surrounding_whitespace() {
+        let id = "37i9dQZF1DXcBWIGoYBM5M";
+        assert_eq!(parse_playlist_id(&format!("  {id}  ")).as_deref(), Some(id));
+    }
+
+    #[test]
+    fn parse_playlist_id_rejects_wrong_length_and_symbols() {
+        assert_eq!(parse_playlist_id(""), None);
+        assert_eq!(parse_playlist_id("   "), None);
+        assert_eq!(parse_playlist_id("123456789012345678901"), None);
+        assert_eq!(parse_playlist_id("123456789012345678901!"), None);
+        assert_eq!(parse_playlist_id("12345678901234567890123"), None);
+    }
+
+    #[test]
+    fn parse_playlist_id_accepts_mixed_case_alphanumerics() {
+        let id = "AbCdEfGhIjKlMnOpQrStUv";
+        assert_eq!(parse_playlist_id(id).as_deref(), Some(id));
+    }
+
+    #[test]
+    fn extract_preview_url_stops_at_common_delimiters() {
+        assert_eq!(
+            extract_preview_url("https://p.scdn.co/mp3-preview/abc'def").as_deref(),
+            Some("https://p.scdn.co/mp3-preview/abc")
+        );
+        assert_eq!(
+            extract_preview_url("https://p.scdn.co/mp3-preview/abc<tag>").as_deref(),
+            Some("https://p.scdn.co/mp3-preview/abc")
+        );
+        assert_eq!(
+            extract_preview_url("https://p.scdn.co/mp3-preview/abc def").as_deref(),
+            Some("https://p.scdn.co/mp3-preview/abc")
+        );
+    }
+
+    #[test]
+    fn extract_preview_url_requires_a_path_after_the_marker() {
+        assert_eq!(extract_preview_url("https://p.scdn.co/mp3-preview/"), None);
+        assert_eq!(
+            extract_preview_url("https://p.scdn.co/mp3-preview/\"quote\""),
+            None
+        );
+    }
+
+    #[test]
+    fn extract_preview_url_accepts_nothing_but_the_marker() {
+        // A path segment of one character is still a usable URL.
+        assert_eq!(
+            extract_preview_url("https://p.scdn.co/mp3-preview/a").as_deref(),
+            Some("https://p.scdn.co/mp3-preview/a")
+        );
+    }
+
+    #[test]
+    fn largest_image_prefers_the_widest_image() {
+        let images = vec![
+            Image {
+                url: "small".into(),
+                width: Some(64),
+            },
+            Image {
+                url: "large".into(),
+                width: Some(640),
+            },
+            Image {
+                url: "medium".into(),
+                width: Some(300),
+            },
+        ];
+        assert_eq!(largest_image_url(&images).as_deref(), Some("large"));
+    }
+
+    #[test]
+    fn largest_image_handles_unknown_widths_and_empty_lists() {
+        let images = vec![
+            Image {
+                url: "unknown".into(),
+                width: None,
+            },
+            Image {
+                url: "known".into(),
+                width: Some(1),
+            },
+        ];
+        assert_eq!(largest_image_url(&images).as_deref(), Some("known"));
+        assert_eq!(largest_image_url(&[]), None);
+    }
+
+    #[test]
+    fn largest_image_keeps_the_last_on_equal_widths() {
+        let images = vec![
+            Image {
+                url: "first".into(),
+                width: Some(100),
+            },
+            Image {
+                url: "second".into(),
+                width: Some(100),
+            },
+        ];
+        assert_eq!(largest_image_url(&images).as_deref(), Some("second"));
+    }
+
+    #[test]
+    fn truncate_body_respects_the_character_limit() {
+        assert_eq!(truncate_body("abc"), "abc");
+        assert_eq!(truncate_body(&"a".repeat(301)).len(), 300);
+        assert_eq!(truncate_body(&"é".repeat(400)).chars().count(), 300);
+    }
+
+    #[test]
+    fn token_response_deserialises_defaults() {
+        let token: TokenResponse = serde_json::from_value(json!({
+            "access_token": "abc"
+        }))
+        .unwrap();
+        assert_eq!(token.access_token, "abc");
+        assert_eq!(token.expires_in, 0);
+        assert_eq!(token.refresh_token, None);
+        assert_eq!(token.scope, None);
+    }
+
+    #[test]
+    fn track_item_prefers_the_new_item_field() {
+        let item: TrackItem = serde_json::from_value(json!({
+            "item": {"id": "new", "name": "New", "type": "track"},
+            "track": {"id": "old", "name": "Old", "type": "track"}
+        }))
+        .unwrap();
+        assert_eq!(item.take_track().unwrap().id.as_deref(), Some("new"));
+    }
+
+    #[test]
+    fn track_item_falls_back_to_the_legacy_track_field() {
+        let item: TrackItem = serde_json::from_value(json!({
+            "track": {"id": "old", "name": "Old", "type": "track"}
+        }))
+        .unwrap();
+        assert_eq!(item.take_track().unwrap().id.as_deref(), Some("old"));
+    }
+
+    #[test]
+    fn track_item_with_both_fields_null_is_skipped() {
+        let item: TrackItem = serde_json::from_value(json!({
+            "item": null,
+            "track": null
+        }))
+        .unwrap();
+        assert!(item.take_track().is_none());
+    }
+
+    fn track_object(value: serde_json::Value) -> TrackObject {
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn track_object_normalises_artists_album_and_metadata() {
+        let track = track_object(json!({
+            "id": "t1",
+            "name": "  Song  ",
+            "type": "track",
+            "duration_ms": 123456,
+            "disc_number": 1,
+            "track_number": 4,
+            "preview_url": " https://preview ",
+            "artists": [
+                {"id": "a1", "name": "One"},
+                {"id": "", "name": "Two"}
+            ],
+            "album": {
+                "id": "al1",
+                "name": "Album",
+                "album_type": "single",
+                "total_tracks": 8,
+                "release_date": "1999-05-01",
+                "release_date_precision": "day",
+                "images": [{"url": "art", "width": 300}]
+            }
+        }))
+        .into_imported(7)
+        .unwrap();
+
+        assert_eq!(track.spotify_id, "t1");
+        assert_eq!(track.title, "Song");
+        assert_eq!(track.artists, "One, Two");
+        assert_eq!(track.album.as_deref(), Some("Album"));
+        assert_eq!(track.album_id.as_deref(), Some("al1"));
+        assert_eq!(track.album_type.as_deref(), Some("single"));
+        assert_eq!(track.total_tracks, Some(8));
+        assert_eq!(track.release_year, Some(1999));
+        assert_eq!(track.preview_url.as_deref(), Some(" https://preview "));
+        assert_eq!(track.duration_ms, Some(123456));
+        assert_eq!(track.position, 7);
+    }
+
+    #[test]
+    fn track_object_rejects_local_non_track_and_missing_id_items() {
+        for value in [
+            json!({"id": "x", "name": "x", "type": "track", "is_local": true}),
+            json!({"id": "x", "name": "x", "type": "episode"}),
+            json!({"id": "", "name": "x", "type": "track"}),
+            json!({"name": "x", "type": "track"}),
+        ] {
+            assert!(track_object(value).into_imported(0).is_none());
+        }
+    }
+
+    #[test]
+    fn track_object_rejects_blank_titles() {
+        assert!(
+            track_object(json!({"id": "x", "name": "   ", "type": "track"}))
+                .into_imported(0)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn track_object_defaults_unknown_artist_and_missing_album() {
+        let track = track_object(json!({"id": "x", "name": "Song", "type": "track"}))
+            .into_imported(0)
+            .unwrap();
+        assert_eq!(track.artists, "Unknown artist");
+        assert!(track.artist_refs.is_empty());
+        assert!(track.album.is_none());
+        assert!(track.release_year.is_none());
+        assert!(track.preview_url.is_none());
+    }
+
+    #[test]
+    fn track_object_with_empty_type_is_still_a_track() {
+        let track = track_object(json!({"id": "x", "name": "Song"}))
+            .into_imported(0)
+            .unwrap();
+        assert_eq!(track.spotify_id, "x");
+    }
+
+    #[test]
+    fn track_object_clamps_oversized_positions() {
+        let track = track_object(json!({"id": "x", "name": "Song"}))
+            .into_imported(usize::MAX)
+            .unwrap();
+        assert_eq!(track.position, i32::MAX);
+    }
+
+    #[test]
+    fn track_object_drops_durations_that_do_not_fit_i32() {
+        let track = track_object(json!({
+            "id": "x", "name": "Song", "duration_ms": 9_000_000_000i64
+        }))
+        .into_imported(0)
+        .unwrap();
+        assert_eq!(track.duration_ms, None);
+    }
+
+    #[tokio::test]
+    async fn fetches_metadata_without_track_items() {
+        let server = MockServer::start().await;
+        mock_token(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/playlists/abc"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "abc",
+                "name": "Info Only",
+                "description": "desc",
+                "images": [{"url": "small", "width": 1}, {"url": "big", "width": 500}],
+                "owner": {"display_name": "owner"}
+            })))
+            .mount(&server)
+            .await;
+
+        let info = test_client(&server)
+            .fetch_playlist_info("abc")
+            .await
+            .unwrap();
+
+        assert_eq!(info.spotify_id, "abc");
+        assert_eq!(info.name, "Info Only");
+        assert_eq!(info.description.as_deref(), Some("desc"));
+        assert_eq!(info.image_url.as_deref(), Some("big"));
+        assert_eq!(info.owner_name.as_deref(), Some("owner"));
+    }
+
+    #[tokio::test]
+    async fn paginates_playlist_items_until_the_total_is_seen() {
+        let server = MockServer::start().await;
+        mock_token(&server).await;
+        mock_metadata(&server, "paged").await;
+
+        let first_page = (0..50)
+            .map(|index| json!({"item": {"id": format!("t{index}"), "name": format!("S{index}"), "type": "track"}}))
+            .collect::<Vec<_>>();
+        let second_page = (50..60)
+            .map(|index| json!({"item": {"id": format!("t{index}"), "name": format!("S{index}"), "type": "track"}}))
+            .collect::<Vec<_>>();
+
+        Mock::given(method("GET"))
+            .and(path("/v1/playlists/paged/items"))
+            .and(wiremock::matchers::query_param("offset", "0"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "items": first_page, "next": "next-url", "total": 60
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/playlists/paged/items"))
+            .and(wiremock::matchers::query_param("offset", "50"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "items": second_page, "next": null, "total": 60
+            })))
+            .mount(&server)
+            .await;
+
+        let playlist = test_client(&server).fetch_playlist("paged").await.unwrap();
+
+        assert_eq!(playlist.tracks.len(), 60);
+        assert_eq!(playlist.tracks[0].position, 0);
+        assert_eq!(playlist.tracks[59].position, 59);
+        assert_eq!(playlist.skipped_tracks, 0);
+    }
+
+    #[tokio::test]
+    async fn stops_paging_when_a_page_is_empty() {
+        let server = MockServer::start().await;
+        mock_token(&server).await;
+        mock_metadata(&server, "empty").await;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/playlists/empty/items"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "items": [], "next": "still-next", "total": 10
+            })))
+            .mount(&server)
+            .await;
+
+        let playlist = test_client(&server).fetch_playlist("empty").await.unwrap();
+        assert!(playlist.tracks.is_empty());
+        assert_eq!(playlist.skipped_tracks, 0);
+    }
+
+    #[tokio::test]
+    async fn counts_skipped_and_duplicate_tracks() {
+        let server = MockServer::start().await;
+        mock_token(&server).await;
+        mock_metadata(&server, "dupes").await;
+
+        Mock::given(method("GET"))
+            .and(path("/v1/playlists/dupes/items"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "items": [
+                    {"item": {"id": "same", "name": "First", "type": "track"}},
+                    {"item": {"id": "same", "name": "Second", "type": "track"}},
+                    {"item": {"id": "episode", "name": "Episode", "type": "episode"}},
+                    {"item": {"id": "local", "name": "Local", "type": "track", "is_local": true}}
+                ],
+                "next": null,
+                "total": 4
+            })))
+            .mount(&server)
+            .await;
+
+        let playlist = test_client(&server).fetch_playlist("dupes").await.unwrap();
+
+        assert_eq!(playlist.tracks.len(), 1);
+        assert_eq!(playlist.tracks[0].title, "First");
+        assert_eq!(playlist.skipped_tracks, 3);
+    }
+
+    #[tokio::test]
+    async fn fetches_current_user() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/me"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "spotify-user",
+                "display_name": "Jort"
+            })))
+            .mount(&server)
+            .await;
+
+        let user = test_client(&server).current_user("token").await.unwrap();
+        assert_eq!(user.id, "spotify-user");
+        assert_eq!(user.display_name.as_deref(), Some("Jort"));
+    }
+
+    #[tokio::test]
+    async fn maps_api_status_codes_to_spotify_errors() {
+        for (status, expected) in [
+            (400, "Api"),
+            (401, "Unauthorized"),
+            (403, "Forbidden"),
+            (404, "NotFound"),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/v1/me"))
+                .respond_with(ResponseTemplate::new(status).set_body_string("nope"))
+                .mount(&server)
+                .await;
+
+            let error = test_client(&server)
+                .current_user("token")
+                .await
+                .unwrap_err();
+            match (status, expected) {
+                (400, _) => assert!(matches!(error, SpotifyError::Api { status: 400, .. })),
+                _ => assert_eq!(format!("{error:?}"), expected),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn rate_limited_api_responses_become_rate_limited_errors() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/me"))
+            .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "0"))
+            .mount(&server)
+            .await;
+
+        // Retries are clamped to one second per attempt, so keep this to the
+        // three attempts the client makes.
+        let error = test_client(&server)
+            .current_user("token")
+            .await
+            .unwrap_err();
+        assert!(matches!(error, SpotifyError::RateLimited));
+    }
+
+    #[tokio::test]
+    async fn maps_unknown_api_errors_with_status_and_truncated_body() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/me"))
+            .respond_with(ResponseTemplate::new(418).set_body_string("x".repeat(400)))
+            .mount(&server)
+            .await;
+
+        let error = test_client(&server)
+            .current_user("token")
+            .await
+            .unwrap_err();
+        match error {
+            SpotifyError::Api { status, message } => {
+                assert_eq!(status, 418);
+                assert_eq!(message.len(), 300);
+            }
+            other => panic!("expected Api error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn token_reconnect_maps_invalid_grant() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/token"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("invalid_grant"))
+            .mount(&server)
+            .await;
+
+        let error = test_client(&server)
+            .exchange_code("bad", "https://example.com/cb")
+            .await
+            .unwrap_err();
+        assert!(matches!(error, SpotifyError::Reconnect));
+    }
+
+    #[tokio::test]
+    async fn token_unauthorized_and_rate_limited_are_mapped() {
+        for (status, expected) in [(401, "Unauthorized"), (429, "RateLimited")] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/api/token"))
+                .respond_with(ResponseTemplate::new(status).set_body_string("no"))
+                .mount(&server)
+                .await;
+
+            let error = test_client(&server)
+                .exchange_code("code", "https://example.com/cb")
+                .await
+                .unwrap_err();
+            assert_eq!(format!("{error:?}"), expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn refreshes_a_user_token() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "access_token": "new-access",
+                "expires_in": 1800
+            })))
+            .mount(&server)
+            .await;
+
+        let tokens = test_client(&server)
+            .refresh_user_token("refresh")
+            .await
+            .unwrap();
+        assert_eq!(tokens.access_token, "new-access");
+        assert_eq!(tokens.refresh_token, None);
+        assert_eq!(tokens.expires_in, 1800);
+    }
+
+    #[tokio::test]
+    async fn fetch_artists_deduplicates_and_skips_empty_ids() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/artists"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "artists": [
+                    {"id": "a1", "name": "One", "genres": ["pop"]},
+                    {"id": "", "name": "Empty", "genres": []},
+                    {"name": "Missing", "genres": []}
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let artists = test_client(&server)
+            .fetch_artists("token", &["a1".into(), "a1".into(), "".into()])
+            .await
+            .unwrap();
+
+        assert_eq!(artists.len(), 1);
+        assert_eq!(artists[0].spotify_id, "a1");
+        assert_eq!(artists[0].genres, vec!["pop".to_string()]);
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn fetch_artists_batches_at_fifty() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/artists"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"artists": []})))
+            .mount(&server)
+            .await;
+
+        let ids = (0..51).map(|index| format!("a{index}")).collect::<Vec<_>>();
+        let artists = test_client(&server)
+            .fetch_artists("token", &ids)
+            .await
+            .unwrap();
+
+        assert!(artists.is_empty());
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn preview_lookup_reads_the_embed_page() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/embed/track/abc"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                r#"<script>{"preview_url":"https://p.scdn.co/mp3-preview/from-embed"}</script>"#,
+            ))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server).with_embed_base(format!("{}/embed/track", server.uri()));
+        assert_eq!(
+            client.fetch_preview_url("abc").await.as_deref(),
+            Some("https://p.scdn.co/mp3-preview/from-embed")
+        );
+    }
+
+    #[tokio::test]
+    async fn preview_lookup_returns_none_for_missing_or_failed_pages() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/embed/track/missing"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/embed/track/blank"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("nothing here"))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server).with_embed_base(format!("{}/embed/track", server.uri()));
+        assert_eq!(client.fetch_preview_url("missing").await, None);
+        assert_eq!(client.fetch_preview_url("blank").await, None);
+    }
+
+    #[test]
+    fn authorize_url_rejects_an_invalid_base_url() {
+        let client = SpotifyClient::with_bases(
+            "id".into(),
+            "secret".into(),
+            DEFAULT_API_BASE.into(),
+            DEFAULT_ACCOUNTS_BASE.into(),
+        )
+        .with_authorize_url("://not-a-url".into());
+        assert!(client
+            .authorize_url("https://example.com/cb", "state")
+            .is_err());
+    }
 }

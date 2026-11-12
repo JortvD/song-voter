@@ -83,6 +83,13 @@ pub async fn load_streak(
         rows.into_iter().map(|row| (row.day, row.picks)).collect();
 
     let goal = daily_streak_goal(connection).await?;
+
+    Ok(streak_summary(&counts, today, goal))
+}
+
+/// Pure streak calculation, separated from the database so the calendar rules
+/// can be tested exhaustively.
+fn streak_summary(counts: &BTreeMap<NaiveDate, i64>, today: NaiveDate, goal: i64) -> StreakSummary {
     let today_picks = counts.get(&today).copied().unwrap_or(0);
     let today_met = today_picks >= goal;
 
@@ -148,7 +155,7 @@ pub async fn load_streak(
         });
     }
 
-    Ok(StreakSummary {
+    StreakSummary {
         current,
         longest,
         today_picks,
@@ -156,7 +163,7 @@ pub async fn load_streak(
         today_met,
         at_risk: !today_met && current > 0,
         days,
-    })
+    }
 }
 
 pub(crate) async fn resolve_timezone(
@@ -189,4 +196,179 @@ pub(crate) async fn resolve_timezone(
     } else {
         "UTC".to_string()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn day(offset: i64) -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 1, 15)
+            .unwrap()
+            .checked_add_signed(Duration::days(offset))
+            .unwrap()
+    }
+
+    fn counts(entries: &[(i64, i64)]) -> BTreeMap<NaiveDate, i64> {
+        entries
+            .iter()
+            .map(|(offset, picks)| (day(*offset), *picks))
+            .collect()
+    }
+
+    #[test]
+    fn empty_history_has_no_streak() {
+        let summary = streak_summary(&BTreeMap::new(), day(0), 3);
+        assert_eq!(summary.current, 0);
+        assert_eq!(summary.longest, 0);
+        assert_eq!(summary.today_picks, 0);
+        assert!(!summary.today_met);
+        assert!(!summary.at_risk);
+    }
+
+    #[test]
+    fn meeting_today_starts_a_one_day_streak() {
+        let summary = streak_summary(&counts(&[(0, 3)]), day(0), 3);
+        assert_eq!(summary.current, 1);
+        assert_eq!(summary.longest, 1);
+        assert!(summary.today_met);
+        assert!(!summary.at_risk);
+    }
+
+    #[test]
+    fn exceeding_the_goal_still_counts_as_met() {
+        let summary = streak_summary(&counts(&[(0, 30)]), day(0), 3);
+        assert!(summary.today_met);
+        assert_eq!(summary.today_picks, 30);
+        assert_eq!(summary.current, 1);
+    }
+
+    #[test]
+    fn one_pick_short_does_not_meet_the_goal() {
+        let summary = streak_summary(&counts(&[(0, 2)]), day(0), 3);
+        assert!(!summary.today_met);
+        assert_eq!(summary.current, 0);
+        assert_eq!(summary.longest, 0);
+    }
+
+    #[test]
+    fn yesterday_only_is_at_risk_but_preserves_the_streak() {
+        let summary = streak_summary(&counts(&[(-1, 3)]), day(0), 3);
+        assert_eq!(summary.current, 1);
+        assert!(summary.at_risk);
+        assert!(!summary.today_met);
+    }
+
+    #[test]
+    fn missing_today_and_yesterday_resets_the_streak() {
+        let summary = streak_summary(&counts(&[(-2, 5), (-3, 4)]), day(0), 3);
+        assert_eq!(summary.current, 0);
+        assert!(!summary.at_risk);
+        assert_eq!(summary.longest, 2);
+    }
+
+    #[test]
+    fn consecutive_days_build_the_current_streak() {
+        let summary = streak_summary(
+            &counts(&[(-4, 3), (-3, 3), (-2, 3), (-1, 3), (0, 3)]),
+            day(0),
+            3,
+        );
+        assert_eq!(summary.current, 5);
+        assert_eq!(summary.longest, 5);
+    }
+
+    #[test]
+    fn a_gap_in_the_middle_breaks_the_current_streak() {
+        let summary = streak_summary(
+            &counts(&[(-5, 3), (-4, 3), (-3, 0), (-2, 3), (-1, 3), (0, 3)]),
+            day(0),
+            3,
+        );
+        assert_eq!(summary.current, 3);
+        assert_eq!(summary.longest, 3);
+    }
+
+    #[test]
+    fn longest_streak_can_be_longer_than_the_current_one() {
+        let summary = streak_summary(
+            &counts(&[(-10, 3), (-9, 3), (-8, 3), (-7, 3), (0, 3)]),
+            day(0),
+            3,
+        );
+        assert_eq!(summary.current, 1);
+        assert_eq!(summary.longest, 4);
+    }
+
+    #[test]
+    fn today_met_connects_to_yesterday() {
+        let summary = streak_summary(&counts(&[(-1, 3), (0, 3)]), day(0), 3);
+        assert_eq!(summary.current, 2);
+        assert_eq!(summary.longest, 2);
+        assert!(!summary.at_risk);
+    }
+
+    #[test]
+    fn day_strip_is_always_seven_days_oldest_first() {
+        let summary = streak_summary(&BTreeMap::new(), day(0), 3);
+        assert_eq!(summary.days.len(), 7);
+        assert_eq!(summary.days[0].date, day(-6).to_string());
+        assert_eq!(summary.days[6].date, day(0).to_string());
+        assert!(summary.days[6].is_today);
+        assert!(summary.days[..6].iter().all(|entry| !entry.is_today));
+    }
+
+    #[test]
+    fn day_strip_reports_picks_and_goal_state() {
+        let summary = streak_summary(&counts(&[(-1, 4), (0, 1)]), day(0), 3);
+        let yesterday = &summary.days[5];
+        let today = &summary.days[6];
+        assert_eq!(yesterday.picks, 4);
+        assert!(yesterday.met);
+        assert_eq!(today.picks, 1);
+        assert!(!today.met);
+    }
+
+    #[test]
+    fn day_strip_uses_the_configured_goal() {
+        let summary = streak_summary(&counts(&[(0, 5)]), day(0), 10);
+        assert!(!summary.today_met);
+        assert!(!summary.days[6].met);
+        assert_eq!(summary.goal, 10);
+    }
+
+    #[test]
+    fn future_days_do_not_affect_the_current_streak() {
+        let summary = streak_summary(&counts(&[(0, 3), (1, 3), (2, 3)]), day(0), 3);
+        assert_eq!(summary.current, 1);
+    }
+
+    #[test]
+    fn longest_streak_includes_future_days_if_present() {
+        // The SQL query only returns past votes in practice, but the pure
+        // helper should remain deterministic for any calendar map.
+        let summary = streak_summary(&counts(&[(0, 3), (1, 3), (2, 3)]), day(0), 3);
+        assert_eq!(summary.longest, 3);
+    }
+
+    #[test]
+    fn goal_of_one_accepts_a_single_pick() {
+        let summary = streak_summary(&counts(&[(0, 1)]), day(0), 1);
+        assert!(summary.today_met);
+        assert_eq!(summary.current, 1);
+    }
+
+    #[test]
+    fn zero_pick_rows_still_appear_in_the_strip() {
+        let summary = streak_summary(&counts(&[(-2, 0)]), day(0), 3);
+        assert_eq!(summary.days[4].picks, 0);
+        assert!(!summary.days[4].met);
+    }
+
+    #[test]
+    fn streak_summary_preserves_the_goal() {
+        for goal in [1, 3, 7, 100] {
+            assert_eq!(streak_summary(&BTreeMap::new(), day(0), goal).goal, goal);
+        }
+    }
 }

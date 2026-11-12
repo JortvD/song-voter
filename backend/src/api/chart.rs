@@ -699,6 +699,63 @@ mod tests {
     use super::*;
 
     #[test]
+    fn empty_status_is_sealed_and_zeroed() {
+        let status = empty_status();
+        assert!(!status.revealed);
+        assert_eq!(status.playlist_id, None);
+        assert_eq!(status.total_tracks, 0);
+        assert_eq!(status.votes_cast, 0);
+        assert!(status.decades.is_empty());
+        assert!(status.genres.is_empty());
+        assert!(status.artists.is_empty());
+    }
+
+    #[test]
+    fn csv_fields_leave_safe_values_unchanged() {
+        assert_eq!(csv_field(""), "");
+        assert_eq!(csv_field("Song Title"), "Song Title");
+        assert_eq!(csv_field("Björk"), "Björk");
+    }
+
+    #[test]
+    fn csv_fields_quote_carriage_returns_and_commas() {
+        assert_eq!(csv_field("a\rb"), "\"a\rb\"");
+        assert_eq!(csv_field("a,b,c"), "\"a,b,c\"");
+    }
+
+    #[test]
+    fn csv_fields_escape_embedded_quotes() {
+        assert_eq!(csv_field("\"quoted\""), "\"\"\"quoted\"\"\"");
+    }
+
+    #[test]
+    fn csv_fields_neutralise_every_formula_prefix() {
+        for value in ["=1+1", "+1", "-1", "@cmd", "\t=1"] {
+            let escaped = csv_field(value);
+            assert!(
+                escaped.starts_with('\'') || escaped.starts_with("\"'"),
+                "{value:?} -> {escaped:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn csv_fields_neutralise_formulas_hidden_behind_spaces() {
+        let escaped = csv_field("   =SUM(A1)");
+        assert_eq!(escaped, "'   =SUM(A1)");
+    }
+
+    #[test]
+    fn csv_fields_do_not_treat_mid_string_equals_as_a_formula() {
+        assert_eq!(csv_field("a=b"), "a=b");
+    }
+
+    #[test]
+    fn csv_fields_do_not_require_quoting_for_a_quote_inside_a_safe_value() {
+        assert_eq!(csv_field("rock 'n' roll"), "rock 'n' roll");
+    }
+
+    #[test]
     fn csv_fields_are_escaped() {
         assert_eq!(csv_field("plain"), "plain");
         assert_eq!(csv_field("with, comma"), "\"with, comma\"");

@@ -86,8 +86,18 @@ fn window_start(
     if let Some(from) = parse_time(from, "from")? {
         return Ok(from);
     }
-    let hours = hours.unwrap_or(default_hours).clamp(0.01, 24.0 * 120.0);
+    let hours = clamped_hours(hours, default_hours, 24.0 * 120.0);
     Ok(Utc::now() - Duration::seconds((hours * 3600.0).round() as i64))
+}
+
+/// Clamp a user-supplied lookback window. Non-finite values (for example
+/// `hours=NaN` from a hand-written query) must not reach `chrono`, where a NaN
+/// cast would silently collapse the window to zero.
+fn clamped_hours(value: Option<f64>, default: f64, max: f64) -> f64 {
+    value
+        .filter(|hours| hours.is_finite())
+        .unwrap_or(default)
+        .clamp(0.01, max)
 }
 
 // ---------------------------------------------------------------------------
@@ -337,7 +347,10 @@ pub(crate) async fn duels_page_for(
     validate_text_input(&user_search, "voter")?;
 
     let from = query.hours.map(|hours| {
-        Utc::now() - Duration::seconds((hours.clamp(0.01, 24.0 * 120.0) * 3600.0).round() as i64)
+        Utc::now()
+            - Duration::seconds(
+                (clamped_hours(Some(hours), 24.0, 24.0 * 120.0) * 3600.0).round() as i64,
+            )
     });
     let from = parse_time(query.from.as_deref(), "from")?.or(from);
     let to = parse_time(query.to.as_deref(), "to")?;
@@ -501,7 +514,8 @@ fn map_duel_row(row: DuelSqlRow, config: &StatsConfig) -> Result<DuelRow, ApiErr
             .to_string()
     });
     let win_chance_pct = row.winner_win_chance;
-    let upset = win_chance_pct.is_some_and(|chance| is_upset(chance, config.upset_threshold_pct));
+    let upset = winner_id.is_some()
+        && win_chance_pct.is_some_and(|chance| is_upset(chance, config.upset_threshold_pct));
     let rating_swing = row.delta_low.map(f64::abs);
     let idle = row
         .decision_seconds
@@ -1283,7 +1297,7 @@ pub async fn pairing_health(
     let from = window_start(query.hours, query.from.as_deref(), 24.0)?;
     let to = Utc::now();
     let window_hours = ((to - from).num_seconds().max(1) as f64 / 3600.0).clamp(0.01, 24.0 * 120.0);
-    let lookback_hours = query.lookback_hours.unwrap_or(1.0).clamp(0.01, 24.0 * 30.0);
+    let lookback_hours = clamped_hours(query.lookback_hours, 1.0, 24.0 * 30.0);
     let lookback_from = to - Duration::seconds((lookback_hours * 3600.0).round() as i64);
 
     let tracks = sqlx::query_as::<_, TrackPairRow>(
@@ -2373,4 +2387,294 @@ async fn vote_quality_inner(
 #[derive(Debug, Default, Deserialize)]
 pub struct VoteQualityQuery {
     pub tz: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn config() -> StatsConfig {
+        StatsConfig {
+            session_gap_minutes: 15,
+            fast_decision_seconds: 1.5,
+            upset_threshold_pct: 35.0,
+            side_bias_margin_pct: 15.0,
+            low_agreement_pct: 55.0,
+            min_votes_for_flags: 30,
+            target_duels_per_song: 30.0,
+        }
+    }
+
+    fn duel_row(flip: bool, winner: Option<Uuid>) -> DuelSqlRow {
+        DuelSqlRow {
+            user_id: Uuid::from_u128(9),
+            username: "voter".to_string(),
+            seen_at: Utc::now(),
+            served_flip: flip,
+            track_low: Uuid::from_u128(1),
+            track_high: Uuid::from_u128(2),
+            winner,
+            voted_at: Some(Utc::now()),
+            rating_low_before: Some(1000.0),
+            rating_high_before: Some(1200.0),
+            delta_low: Some(20.0),
+            delta_high: Some(-20.0),
+            comparisons_low_before: Some(4),
+            comparisons_high_before: Some(8),
+            k_factor: Some(39.5),
+            seq: Some(77),
+            low_title: "Low".to_string(),
+            low_artists: "Low Artist".to_string(),
+            low_release_year: Some(1990),
+            low_image_url: Some("low.jpg".to_string()),
+            low_preview_url: Some("low.mp3".to_string()),
+            high_title: "High".to_string(),
+            high_artists: "High Artist".to_string(),
+            high_release_year: Some(2000),
+            high_image_url: Some("high.jpg".to_string()),
+            high_preview_url: Some("high.mp3".to_string()),
+            low_rank: 2,
+            high_rank: 1,
+            low_current_rating: 1020.0,
+            high_current_rating: 1180.0,
+            winner_win_chance: Some(24.0),
+            decision_seconds: Some(5.0),
+        }
+    }
+
+    #[test]
+    fn parse_time_accepts_rfc3339_and_normalises_to_utc() {
+        assert_eq!(
+            parse_time(Some("2025-01-02T03:04:05+02:00"), "from").unwrap(),
+            Some(Utc.with_ymd_and_hms(2025, 1, 2, 1, 4, 5).unwrap())
+        );
+    }
+
+    #[test]
+    fn parse_time_treats_empty_values_as_missing() {
+        assert_eq!(parse_time(None, "from").unwrap(), None);
+        assert_eq!(parse_time(Some(""), "from").unwrap(), None);
+        assert_eq!(parse_time(Some("   "), "from").unwrap(), None);
+    }
+
+    #[test]
+    fn parse_time_rejects_invalid_timestamps() {
+        let error = parse_time(Some("yesterday"), "to").unwrap_err();
+        assert!(matches!(error, ApiError::BadRequest(message) if message.contains("to")));
+    }
+
+    #[test]
+    fn parse_time_rejects_control_characters() {
+        let error = parse_time(Some("2025-01-01T00:00:00Z\0"), "from").unwrap_err();
+        assert!(
+            matches!(error, ApiError::BadRequest(message) if message.contains("invalid characters"))
+        );
+        // Leading/trailing whitespace is intentionally trimmed by the query
+        // parser before validation.
+        assert!(parse_time(Some(" 2025-01-01T00:00:00Z\n"), "from").is_ok());
+    }
+
+    #[test]
+    fn window_start_prefers_an_explicit_from() {
+        let explicit = Utc.with_ymd_and_hms(2025, 5, 1, 0, 0, 0).unwrap();
+        let start = window_start(Some(9999.0), Some("2025-05-01T00:00:00Z"), 24.0).unwrap();
+        assert_eq!(start, explicit);
+    }
+
+    #[test]
+    fn window_start_clamps_hours_into_the_supported_range() {
+        let before = Utc::now();
+        let start = window_start(Some(0.0), None, 24.0).unwrap();
+        let after = Utc::now();
+        assert!(start <= before - Duration::seconds(35));
+        assert!(start >= after - Duration::seconds(37));
+
+        let far = window_start(Some(f64::INFINITY), None, 24.0).unwrap();
+        assert!(far <= Utc::now() - Duration::hours(24 - 1));
+        assert!(far >= Utc::now() - Duration::hours(24 + 1));
+    }
+
+    #[test]
+    fn window_start_uses_the_default_for_non_finite_hours() {
+        let start = window_start(Some(f64::NAN), None, 24.0).unwrap();
+        let expected = Utc::now() - Duration::hours(24);
+        assert!((start - expected).num_seconds().abs() < 5);
+    }
+
+    #[test]
+    fn clamped_hours_guards_every_non_finite_input() {
+        assert_eq!(clamped_hours(Some(f64::NAN), 12.0, 100.0), 12.0);
+        assert_eq!(clamped_hours(Some(f64::INFINITY), 12.0, 100.0), 12.0);
+        assert_eq!(clamped_hours(Some(f64::NEG_INFINITY), 12.0, 100.0), 12.0);
+        assert_eq!(clamped_hours(None, 12.0, 100.0), 12.0);
+        assert_eq!(clamped_hours(Some(-5.0), 12.0, 100.0), 0.01);
+        assert_eq!(clamped_hours(Some(500.0), 12.0, 100.0), 100.0);
+    }
+
+    #[test]
+    fn map_duel_row_keeps_the_normal_orientation() {
+        let row = map_duel_row(duel_row(false, Some(Uuid::from_u128(1))), &config()).unwrap();
+        assert_eq!(row.track_a.title, "Low");
+        assert_eq!(row.track_b.title, "High");
+        assert_eq!(row.result_side.as_deref(), Some("A"));
+        assert_eq!(row.details.rating_a_before, Some(1000.0));
+        assert_eq!(row.details.rating_b_before, Some(1200.0));
+        assert_eq!(row.details.rating_a_after, Some(1020.0));
+        assert_eq!(row.details.rating_b_after, Some(1180.0));
+        assert_eq!(row.details.delta_a, Some(20.0));
+        assert_eq!(row.details.delta_b, Some(-20.0));
+        assert_eq!(row.details.comparisons_a_before, Some(4));
+        assert_eq!(row.details.comparisons_b_before, Some(8));
+        assert!((row.details.rating_gap_before.unwrap() - 200.0).abs() < 1e-9);
+        assert_eq!(row.details.k_factor, Some(39.5));
+        assert_eq!(row.details.vote_seq, Some(77));
+    }
+
+    #[test]
+    fn map_duel_row_swaps_everything_when_the_sides_were_flipped() {
+        let row = map_duel_row(duel_row(true, Some(Uuid::from_u128(1))), &config()).unwrap();
+        assert_eq!(row.track_a.title, "High");
+        assert_eq!(row.track_b.title, "Low");
+        assert_eq!(row.result_side.as_deref(), Some("B"));
+        assert_eq!(row.details.rating_a_before, Some(1200.0));
+        assert_eq!(row.details.rating_b_before, Some(1000.0));
+        assert_eq!(row.details.rating_a_after, Some(1180.0));
+        assert_eq!(row.details.rating_b_after, Some(1020.0));
+        assert_eq!(row.details.delta_a, Some(-20.0));
+        assert_eq!(row.details.delta_b, Some(20.0));
+        assert_eq!(row.details.comparisons_a_before, Some(8));
+        assert_eq!(row.details.comparisons_b_before, Some(4));
+    }
+
+    #[test]
+    fn map_duel_row_reports_win_chances_in_served_order() {
+        let normal = map_duel_row(duel_row(false, None), &config()).unwrap();
+        assert!((normal.details.win_chance_a.unwrap() - 24.0253073352).abs() < 1e-6);
+        assert!((normal.details.win_chance_b.unwrap() - 75.9746926648).abs() < 1e-6);
+
+        let flipped = map_duel_row(duel_row(true, None), &config()).unwrap();
+        assert!((flipped.details.win_chance_a.unwrap() - 75.9746926648).abs() < 1e-6);
+        assert!((flipped.details.win_chance_b.unwrap() - 24.0253073352).abs() < 1e-6);
+    }
+
+    #[test]
+    fn map_duel_row_marks_upsets_from_the_winner_chance() {
+        let upset = map_duel_row(duel_row(false, Some(Uuid::from_u128(1))), &config()).unwrap();
+        assert!(upset.upset);
+
+        let mut expected = duel_row(false, Some(Uuid::from_u128(2)));
+        expected.winner_win_chance = Some(75.0);
+        assert!(!map_duel_row(expected, &config()).unwrap().upset);
+    }
+
+    #[test]
+    fn map_duel_row_treats_a_missing_vote_as_no_vote() {
+        let row = map_duel_row(duel_row(false, None), &config()).unwrap();
+        assert!(row.no_vote);
+        assert_eq!(row.result_side, None);
+        assert_eq!(row.winner_id, None);
+        assert!(!row.upset);
+    }
+
+    #[test]
+    fn map_duel_row_keeps_a_normal_decision_time() {
+        let row = map_duel_row(duel_row(false, Some(Uuid::from_u128(1))), &config()).unwrap();
+        assert_eq!(row.decision_seconds, Some(5.0));
+        assert!(!row.idle);
+    }
+
+    #[test]
+    fn map_duel_row_excludes_idle_and_negative_decisions() {
+        let mut idle = duel_row(false, Some(Uuid::from_u128(1)));
+        idle.decision_seconds = Some(901.0);
+        let row = map_duel_row(idle, &config()).unwrap();
+        assert!(row.idle);
+        assert_eq!(row.decision_seconds, None);
+
+        let mut negative = duel_row(false, Some(Uuid::from_u128(1)));
+        negative.decision_seconds = Some(-0.1);
+        let row = map_duel_row(negative, &config()).unwrap();
+        assert!(row.idle);
+        assert_eq!(row.decision_seconds, None);
+    }
+
+    #[test]
+    fn map_duel_row_handles_missing_rating_history() {
+        let mut input = duel_row(false, Some(Uuid::from_u128(1)));
+        input.rating_low_before = None;
+        input.rating_high_before = None;
+        input.delta_low = None;
+        input.delta_high = None;
+        let row = map_duel_row(input, &config()).unwrap();
+        assert_eq!(row.details.rating_a_before, None);
+        assert_eq!(row.details.rating_b_before, None);
+        assert_eq!(row.details.rating_a_after, None);
+        assert_eq!(row.details.rating_b_after, None);
+        assert_eq!(row.details.win_chance_a, None);
+        assert_eq!(row.details.win_chance_b, None);
+        assert_eq!(row.details.rating_gap_before, None);
+        assert_eq!(row.rating_swing, None);
+    }
+
+    #[test]
+    fn map_duel_row_uses_the_absolute_rating_swing() {
+        let mut input = duel_row(false, Some(Uuid::from_u128(2)));
+        input.delta_low = Some(-7.5);
+        let row = map_duel_row(input, &config()).unwrap();
+        assert_eq!(row.rating_swing, Some(7.5));
+        assert_eq!(row.result_side.as_deref(), Some("B"));
+    }
+
+    fn track_meta() -> TrackMeta {
+        TrackMeta {
+            id: Uuid::from_u128(1),
+            title: "Title".to_string(),
+            artists: "Artist".to_string(),
+            album_image_url: Some("image".to_string()),
+            rating: 1000.0,
+            comparisons: 3,
+        }
+    }
+
+    #[test]
+    fn move_row_calculates_a_climb() {
+        let move_row = move_row(&track_meta(), 5, 20);
+        assert_eq!(move_row.id, Uuid::from_u128(1));
+        assert_eq!(move_row.rank_now, 5);
+        assert_eq!(move_row.rank_then, 20);
+        assert_eq!(move_row.change, 15);
+    }
+
+    #[test]
+    fn move_row_calculates_a_fall() {
+        let move_row = move_row(&track_meta(), 20, 5);
+        assert_eq!(move_row.change, -15);
+    }
+
+    #[test]
+    fn form_rows_convert_tuple_columns() {
+        let rows = vec![(
+            Uuid::from_u128(1),
+            "Title".to_string(),
+            "Artist".to_string(),
+            Some("image".to_string()),
+            10,
+            7,
+            5.5,
+            1.5,
+        )];
+        let converted = form_to_rows(rows);
+        assert_eq!(converted.len(), 1);
+        assert_eq!(converted[0].id, Uuid::from_u128(1));
+        assert_eq!(converted[0].votes, 10);
+        assert_eq!(converted[0].wins, 7);
+        assert_eq!(converted[0].expected_wins, 5.5);
+        assert_eq!(converted[0].form, 1.5);
+    }
+
+    #[test]
+    fn form_rows_convert_an_empty_list() {
+        assert!(form_to_rows(Vec::new()).is_empty());
+    }
 }

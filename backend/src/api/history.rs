@@ -56,7 +56,6 @@ enum HistoryFilter {
     Picked,
     Skipped,
 }
-
 impl HistoryFilter {
     fn from_query(value: Option<&str>) -> Self {
         match value.unwrap_or("all") {
@@ -273,4 +272,53 @@ async fn hydrate_history(
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn history_filter_defaults_to_all() {
+        assert_eq!(HistoryFilter::from_query(None), HistoryFilter::All);
+    }
+
+    #[test]
+    fn history_filter_parses_picked_and_skipped() {
+        assert_eq!(
+            HistoryFilter::from_query(Some("picked")),
+            HistoryFilter::Picked
+        );
+        assert_eq!(
+            HistoryFilter::from_query(Some("skipped")),
+            HistoryFilter::Skipped
+        );
+    }
+
+    #[test]
+    fn history_filter_accepts_all_as_a_value() {
+        assert_eq!(HistoryFilter::from_query(Some("all")), HistoryFilter::All);
+    }
+
+    #[test]
+    fn history_filter_treats_unknown_values_as_all() {
+        for value in ["", "PICKED", "done", "skipped "] {
+            assert_eq!(
+                HistoryFilter::from_query(Some(value)),
+                HistoryFilter::All,
+                "{value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn filtered_totals_are_derived_from_the_counts() {
+        let counts = HistoryCounts {
+            total: 10,
+            picked: 7,
+        };
+        assert_eq!(counts.total, 10);
+        assert_eq!(counts.picked, 7);
+        assert_eq!(counts.total - counts.picked, 3);
+    }
 }

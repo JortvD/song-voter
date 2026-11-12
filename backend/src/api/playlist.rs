@@ -910,3 +910,40 @@ async fn persist_import(
 
     Ok((playlist, total_tracks))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ID: &str = "37i9dQZF1DXcBWIGoYBM5M";
+
+    #[test]
+    fn parse_playlist_input_accepts_a_bare_id() {
+        assert_eq!(parse_playlist_input(ID).unwrap(), ID);
+    }
+
+    #[test]
+    fn parse_playlist_input_accepts_a_url_and_uri() {
+        assert_eq!(
+            parse_playlist_input(&format!("https://open.spotify.com/playlist/{ID}?si=x")).unwrap(),
+            ID
+        );
+        assert_eq!(
+            parse_playlist_input(&format!("spotify:playlist:{ID}")).unwrap(),
+            ID
+        );
+    }
+
+    #[test]
+    fn parse_playlist_input_rejects_invalid_input_with_a_helpful_message() {
+        let error = parse_playlist_input("not a playlist").unwrap_err();
+        assert!(
+            matches!(error, ApiError::BadRequest(message) if message.contains("Spotify playlist"))
+        );
+    }
+
+    #[test]
+    fn parse_playlist_input_rejects_empty_input() {
+        assert!(parse_playlist_input("   ").is_err());
+    }
+}

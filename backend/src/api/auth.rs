@@ -387,4 +387,48 @@ mod tests {
         assert!(!valid_login_password(""));
         assert!(!valid_login_password(&"a".repeat(129)));
     }
+
+    #[test]
+    fn login_username_accepts_one_and_sixty_four_characters() {
+        assert!(valid_login_username("a"));
+        assert!(valid_login_username(&"a".repeat(64)));
+    }
+
+    #[test]
+    fn login_username_accepts_legacy_symbols_and_unicode() {
+        assert!(valid_login_username("legacy user"));
+        assert!(valid_login_username("josé"));
+        assert!(valid_login_username("名字"));
+    }
+
+    #[test]
+    fn login_username_rejects_every_control_character() {
+        for value in ["\t", "\r", "\n", "\u{1b}", "\u{7f}"] {
+            assert!(!valid_login_username(value), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn login_username_counts_characters_not_bytes() {
+        assert!(valid_login_username(&"é".repeat(64)));
+        assert!(!valid_login_username(&"é".repeat(65)));
+    }
+
+    #[test]
+    fn login_password_accepts_one_and_128_characters() {
+        assert!(valid_login_password("x"));
+        assert!(valid_login_password(&"x".repeat(128)));
+    }
+
+    #[test]
+    fn login_password_counts_characters_not_bytes() {
+        assert!(valid_login_password(&"é".repeat(128)));
+        assert!(!valid_login_password(&"é".repeat(129)));
+    }
+
+    #[test]
+    fn login_password_allows_spaces_and_controls_for_legacy_passes() {
+        assert!(valid_login_password("   "));
+        assert!(valid_login_password("pass\tword"));
+    }
 }

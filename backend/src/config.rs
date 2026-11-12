@@ -206,7 +206,7 @@ fn parse_bool(value: &str) -> anyhow::Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::{looks_like_placeholder, validate_admin_password};
+    use super::*;
 
     #[test]
     fn rejects_example_and_weak_values() {
@@ -236,5 +236,101 @@ mod tests {
         assert!(validate_admin_password("admin", Some("admin")).is_err());
         assert!(validate_admin_password("change-me", Some("admin")).is_err());
         assert!(validate_admin_password("a-long-random-password", Some("admin")).is_ok());
+    }
+
+    #[test]
+    fn parse_bool_accepts_every_supported_true_spelling() {
+        for value in ["1", "true", "TRUE", "yes", "YES", "on", "On"] {
+            assert!(parse_bool(value).unwrap(), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn parse_bool_accepts_every_supported_false_spelling() {
+        for value in ["0", "false", "FALSE", "no", "NO", "off", "Off"] {
+            assert!(!parse_bool(value).unwrap(), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn parse_bool_rejects_unknown_values() {
+        for value in ["", "maybe", "2", "enabled", " true "] {
+            assert!(parse_bool(value).is_err(), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn placeholders_are_detected_case_insensitively() {
+        for value in ["CHANGE-ME", "ChangeMe", "replace-with-secret", "LOCAL-DEV"] {
+            assert!(looks_like_placeholder(value), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn placeholder_detection_recognises_the_example_database_and_admin_values() {
+        assert!(looks_like_placeholder(
+            "postgres://ulltop2000:ulltop2000@db/ulltop2000"
+        ));
+        assert!(looks_like_placeholder("ulltop2000"));
+        assert!(looks_like_placeholder("admin"));
+        assert!(looks_like_placeholder("password"));
+    }
+
+    #[test]
+    fn placeholder_detection_accepts_strong_values() {
+        for value in [
+            "correct horse battery staple",
+            "e3b0c44298fc1c149afbf4c8996fb924",
+            "postgres://user:very-long-random-password@db/app",
+        ] {
+            assert!(!looks_like_placeholder(value), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn admin_password_requires_twelve_characters() {
+        assert!(validate_admin_password("12345678901", None).is_err());
+        assert!(validate_admin_password("123456789012", None).is_ok());
+    }
+
+    #[test]
+    fn admin_password_cannot_equal_the_username_ignoring_case() {
+        assert!(validate_admin_password("Administrator", Some("administrator")).is_err());
+        assert!(validate_admin_password("Administrator1", Some("administrator")).is_ok());
+    }
+
+    #[test]
+    fn admin_password_without_a_username_still_checks_placeholder_and_length() {
+        assert!(validate_admin_password("change-me-long", None).is_err());
+        assert!(validate_admin_password("short", None).is_err());
+        assert!(validate_admin_password("a-long-random-password", None).is_ok());
+    }
+
+    #[test]
+    fn bind_address_joins_host_and_port() {
+        let config = Config {
+            environment: "test".into(),
+            host: "127.0.0.1".into(),
+            port: 8765,
+            database_url: "postgres://localhost/test".into(),
+            log_filter: "info".into(),
+            frontend_dir: ".".into(),
+            jwt_secret: "x".into(),
+            jwt_secret_was_generated: false,
+            jwt_ttl_hours: 1,
+            cookie_secure: false,
+            login_rate_limit: 1,
+            register_rate_limit: 1,
+            admin_username: None,
+            admin_password: None,
+            spotify_client_id: None,
+            spotify_client_secret: None,
+            spotify_api_base: DEFAULT_API_BASE.into(),
+            spotify_accounts_base: DEFAULT_ACCOUNTS_BASE.into(),
+            spotify_authorize_url: DEFAULT_AUTHORIZE_URL.into(),
+            spotify_embed_base: DEFAULT_EMBED_BASE.into(),
+            spotify_redirect_uri: None,
+        };
+        assert_eq!(config.bind_address(), "127.0.0.1:8765");
     }
 }

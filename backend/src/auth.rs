@@ -244,7 +244,7 @@ pub fn validate_password(password: &str) -> Result<(), ApiError> {
             "password must be at least 8 characters",
         ));
     }
-    if password.len() > 128 {
+    if password.chars().count() > 128 {
         return Err(ApiError::bad_request(
             "password must be at most 128 characters",
         ));
@@ -374,5 +374,266 @@ mod tests {
         assert_eq!(claims.sub, user.id);
         assert_eq!(claims.username, "jort");
         assert!(claims.is_admin);
+    }
+
+    fn test_user(username: &str) -> User {
+        User {
+            id: Uuid::new_v4(),
+            username: username.into(),
+            password_hash: "unused".into(),
+            is_admin: false,
+            created_at: Utc::now(),
+            disabled_at: None,
+            session_version: 7,
+        }
+    }
+
+    #[test]
+    fn username_accepts_minimum_and_maximum_lengths() {
+        assert_eq!(validate_username("abc").unwrap(), "abc");
+        assert_eq!(validate_username(&"a".repeat(32)).unwrap(), "a".repeat(32));
+    }
+
+    #[test]
+    fn username_rejects_one_character_too_long() {
+        assert!(validate_username(&"a".repeat(33)).is_err());
+    }
+
+    #[test]
+    fn username_counts_characters_not_bytes() {
+        // 33 multi-byte characters must still be rejected even though the byte
+        // length is much larger.
+        assert!(validate_username(&"é".repeat(33)).is_err());
+    }
+
+    #[test]
+    fn username_rejects_non_ascii_characters() {
+        for name in ["josé", "名字", "rock🎸", "space\ttab", "line\nbreak"] {
+            assert!(validate_username(name).is_err(), "{name:?} should fail");
+        }
+    }
+
+    #[test]
+    fn username_allows_underscores_and_dashes() {
+        assert_eq!(validate_username(" dj_jort-2000 ").unwrap(), "dj_jort-2000");
+    }
+
+    #[test]
+    fn username_rejects_empty_and_whitespace_only() {
+        assert!(validate_username("").is_err());
+        assert!(validate_username("   ").is_err());
+    }
+
+    #[test]
+    fn password_accepts_exactly_eight_characters() {
+        assert!(validate_password("12345678").is_ok());
+    }
+
+    #[test]
+    fn password_rejects_seven_characters() {
+        assert!(validate_password("1234567").is_err());
+    }
+
+    #[test]
+    fn password_accepts_multibyte_characters_by_character_count() {
+        assert!(validate_password("éééééééé").is_ok());
+    }
+
+    #[test]
+    fn password_rejects_more_than_128_characters() {
+        assert!(validate_password(&"a".repeat(129)).is_err());
+        assert!(validate_password(&"a".repeat(128)).is_ok());
+        assert!(validate_password(&"é".repeat(129)).is_err());
+        assert!(validate_password(&"é".repeat(128)).is_ok());
+    }
+
+    #[test]
+    fn password_does_not_trim_whitespace() {
+        assert!(validate_password("        ").is_ok());
+        assert!(validate_password("short   ").is_ok());
+        assert!(validate_password("       ").is_err());
+    }
+
+    #[tokio::test]
+    async fn verify_password_rejects_a_malformed_hash() {
+        assert!(verify_password("anything", "not-a-hash").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn verifies_passwords_with_unicode_and_spaces() {
+        let password = "  señor contraseña  ";
+        let hash = hash_password(password).await.unwrap();
+        assert!(verify_password(password, &hash).await.unwrap());
+        assert!(!verify_password("señor contraseña", &hash).await.unwrap());
+    }
+
+    #[test]
+    fn jwt_carries_the_session_version_and_admin_flag() {
+        let service = AuthService::new("test-secret-at-least-32-characters-long", 1, false);
+        let mut user = test_user("voter");
+        user.is_admin = true;
+        let claims = service
+            .decode_token(&service.issue_token(&user).unwrap())
+            .unwrap();
+        assert_eq!(claims.session_version, 7);
+        assert!(claims.is_admin);
+    }
+
+    #[test]
+    fn jwt_is_rejected_with_a_different_secret() {
+        let issuer = AuthService::new("first-secret-at-least-32-characters", 1, false);
+        let verifier = AuthService::new("second-secret-at-least-32-characters", 1, false);
+        let token = issuer.issue_token(&test_user("voter")).unwrap();
+        assert!(verifier.decode_token(&token).is_err());
+    }
+
+    #[test]
+    fn jwt_is_rejected_after_tampering() {
+        let service = AuthService::new("test-secret-at-least-32-characters-long", 1, false);
+        let token = service.issue_token(&test_user("voter")).unwrap();
+        let mut bytes = token.into_bytes();
+        let index = bytes.len() / 2;
+        bytes[index] = if bytes[index] == b'a' { b'b' } else { b'a' };
+        let tampered = String::from_utf8(bytes).unwrap();
+        assert!(service.decode_token(&tampered).is_err());
+    }
+
+    #[test]
+    fn expired_jwt_is_rejected() {
+        let service = AuthService::new("test-secret-at-least-32-characters-long", -1, false);
+        let token = service.issue_token(&test_user("voter")).unwrap();
+        assert!(service.decode_token(&token).is_err());
+    }
+
+    #[test]
+    fn malformed_jwt_is_rejected() {
+        let service = AuthService::new("test-secret-at-least-32-characters-long", 1, false);
+        for token in ["", "not.a.token", "a.b", "...."] {
+            assert!(service.decode_token(token).is_err(), "{token:?}");
+        }
+    }
+
+    #[test]
+    fn legacy_claims_without_session_version_default_to_zero() {
+        #[derive(Serialize)]
+        struct LegacyClaims<'a> {
+            sub: Uuid,
+            username: &'a str,
+            is_admin: bool,
+            iat: i64,
+            exp: i64,
+        }
+
+        let service = AuthService::new("test-secret-at-least-32-characters-long", 1, false);
+        let now = Utc::now().timestamp();
+        let token = encode(
+            &Header::default(),
+            &LegacyClaims {
+                sub: Uuid::new_v4(),
+                username: "legacy",
+                is_admin: false,
+                iat: now,
+                exp: now + 60,
+            },
+            &EncodingKey::from_secret(b"test-secret-at-least-32-characters-long"),
+        )
+        .unwrap();
+
+        let claims = service.decode_token(&token).unwrap();
+        assert_eq!(claims.session_version, 0);
+    }
+
+    #[test]
+    fn session_cookie_is_http_only_and_lax() {
+        let service = AuthService::new("test-secret-at-least-32-characters-long", 2, true);
+        let cookie = service.session_cookie("token-value".to_string());
+        assert_eq!(cookie.name(), SESSION_COOKIE);
+        assert_eq!(cookie.value(), "token-value");
+        assert_eq!(cookie.path(), Some("/"));
+        assert_eq!(cookie.http_only(), Some(true));
+        assert_eq!(cookie.secure(), Some(true));
+        assert_eq!(cookie.same_site(), Some(SameSite::Lax));
+        assert_eq!(cookie.max_age(), Some(cookie::time::Duration::hours(2)));
+    }
+
+    #[test]
+    fn session_cookie_respects_insecure_development_setting() {
+        let service = AuthService::new("test-secret-at-least-32-characters-long", 1, false);
+        let cookie = service.session_cookie("token".to_string());
+        assert_eq!(cookie.secure(), Some(false));
+    }
+
+    #[test]
+    fn removal_cookie_expires_immediately() {
+        let service = AuthService::new("test-secret-at-least-32-characters-long", 2, true);
+        let cookie = service.removal_cookie();
+        assert_eq!(cookie.name(), SESSION_COOKIE);
+        assert_eq!(cookie.value(), "");
+        assert_eq!(cookie.max_age(), Some(cookie::time::Duration::ZERO));
+        assert_eq!(cookie.path(), Some("/"));
+    }
+
+    fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut map = HeaderMap::new();
+        for (name, value) in pairs {
+            map.insert(
+                axum::http::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+                value.parse().unwrap(),
+            );
+        }
+        map
+    }
+
+    #[test]
+    fn client_info_prefers_x_real_ip() {
+        let map = headers(&[
+            ("x-real-ip", "203.0.113.9"),
+            ("x-forwarded-for", "198.51.100.1, 203.0.113.9"),
+            ("user-agent", "TestBrowser/1.0"),
+        ]);
+        let (ip, agent) = client_info(&map);
+        assert_eq!(ip.as_deref(), Some("203.0.113.9"));
+        assert_eq!(agent.as_deref(), Some("TestBrowser/1.0"));
+    }
+
+    #[test]
+    fn client_info_uses_the_last_forwarded_address() {
+        let map = headers(&[(
+            "x-forwarded-for",
+            " 198.51.100.1 , 203.0.113.7 , 192.0.2.4 ",
+        )]);
+        let (ip, _) = client_info(&map);
+        assert_eq!(ip.as_deref(), Some("192.0.2.4"));
+    }
+
+    #[test]
+    fn client_info_ignores_empty_proxy_headers() {
+        let map = headers(&[("x-real-ip", "   "), ("x-forwarded-for", " , 203.0.113.2")]);
+        let (ip, _) = client_info(&map);
+        assert_eq!(ip.as_deref(), Some("203.0.113.2"));
+    }
+
+    #[test]
+    fn client_info_returns_none_without_headers() {
+        let (ip, agent) = client_info(&HeaderMap::new());
+        assert_eq!(ip, None);
+        assert_eq!(agent, None);
+    }
+
+    #[test]
+    fn client_info_truncates_to_database_bounds() {
+        let long_ip = "1".repeat(200);
+        let long_agent = "u".repeat(2_000);
+        let map = headers(&[("x-real-ip", &long_ip), ("user-agent", &long_agent)]);
+        let (ip, agent) = client_info(&map);
+        assert_eq!(ip.unwrap().chars().count(), 64);
+        assert_eq!(agent.unwrap().chars().count(), 512);
+    }
+
+    #[test]
+    fn truncate_counts_characters_not_bytes() {
+        assert_eq!(truncate("ééé", 2), "éé");
+        assert_eq!(truncate("abc", 10), "abc");
+        assert_eq!(truncate("abc", 0), "");
     }
 }

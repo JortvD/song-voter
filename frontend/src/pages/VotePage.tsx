@@ -22,7 +22,12 @@ import {
   playUndo,
 } from '../lib/sound'
 import { localTimezone } from '../lib/time'
-import type { DuelHistoryItem, Matchup, StreakSummary } from '../lib/types'
+import type {
+  DuelHistoryItem,
+  Matchup,
+  MatchupTrack,
+  StreakSummary,
+} from '../lib/types'
 
 const AUTOPREVIEW_KEY = 'pv-autoplay-previews'
 const CROSSFADE_MS = 200
@@ -51,21 +56,125 @@ function storedDuelKey(userId: string) {
   return `pv-current-duel:${userId}`
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function isText(value: unknown): value is string {
+  return typeof value === 'string'
+}
+
+function isNullableText(value: unknown): value is string | null {
+  return value === null || typeof value === 'string'
+}
+
+function isNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function isNullableNumber(value: unknown): value is number | null {
+  return value === null || isNumber(value)
+}
+
+function isMatchupTrack(value: unknown): value is MatchupTrack {
+  if (!isRecord(value)) return false
+
+  return (
+    isText(value.id) &&
+    isText(value.spotify_id) &&
+    isText(value.title) &&
+    isText(value.artists) &&
+    isNullableText(value.album) &&
+    isNullableText(value.album_image_url) &&
+    isNullableText(value.preview_url) &&
+    isNullableNumber(value.duration_ms) &&
+    isNullableNumber(value.release_year) &&
+    isNullableNumber(value.decade) &&
+    isNullableText(value.album_id) &&
+    isNullableText(value.album_type) &&
+    isNullableNumber(value.total_tracks) &&
+    isNullableNumber(value.disc_number) &&
+    isNullableNumber(value.track_number) &&
+    isNullableText(value.primary_genre)
+  )
+}
+
+function isDuelHistoryItem(value: unknown): value is DuelHistoryItem {
+  if (!isRecord(value)) return false
+
+  return (
+    isMatchupTrack(value.track_a) &&
+    isMatchupTrack(value.track_b) &&
+    isNullableText(value.picked_track_id) &&
+    isText(value.seen_at) &&
+    isNullableText(value.picked_at)
+  )
+}
+
+function isStreakSummary(value: unknown): value is StreakSummary {
+  if (!isRecord(value)) return false
+  if (!Array.isArray(value.days)) return false
+
+  const daysOk = value.days.every((day) => {
+    if (!isRecord(day)) return false
+    return (
+      isText(day.date) &&
+      isNumber(day.picks) &&
+      typeof day.met === 'boolean' &&
+      typeof day.is_today === 'boolean'
+    )
+  })
+
+  return (
+    daysOk &&
+    isNumber(value.current) &&
+    isNumber(value.longest) &&
+    isNumber(value.today_picks) &&
+    isNumber(value.goal) &&
+    typeof value.today_met === 'boolean' &&
+    typeof value.at_risk === 'boolean'
+  )
+}
+
+function isStoredMatchup(value: unknown, playlistId: string): value is Matchup {
+  if (!isRecord(value)) return false
+  if (!Array.isArray(value.recent_duels)) return false
+
+  return (
+    value.playlist_id === playlistId &&
+    isText(value.playlist_name) &&
+    isMatchupTrack(value.track_a) &&
+    isMatchupTrack(value.track_b) &&
+    isNumber(value.compared_pairs) &&
+    isNumber(value.tracks_seen) &&
+    isNumber(value.total_tracks) &&
+    isNumber(value.votes_cast) &&
+    value.recent_duels.every(isDuelHistoryItem) &&
+    isStreakSummary(value.streak)
+  )
+}
+
+function clearStoredDuel(userId: string) {
+  try {
+    window.sessionStorage.removeItem(storedDuelKey(userId))
+  } catch {
+    // Storage can be disabled; there is nothing to clear.
+  }
+}
+
 function readStoredDuel(userId: string, playlistId: string): Matchup | null {
   try {
     const raw = window.sessionStorage.getItem(storedDuelKey(userId))
     if (!raw) return null
-    const value = JSON.parse(raw) as Matchup
-    if (
-      value?.playlist_id === playlistId &&
-      value.track_a?.id &&
-      value.track_b?.id
-    ) {
-      return value
-    }
+    const value: unknown = JSON.parse(raw)
+    if (isStoredMatchup(value, playlistId)) return value
   } catch {
     // Storage can be disabled or contain an old/corrupt value.
   }
+
+  // A cached duel from an older app version (or another playlist) must never
+  // be rendered: missing counters/streak fields would crash the duel screen.
+  clearStoredDuel(userId)
   return null
 }
 

@@ -80,3 +80,61 @@ pub async fn user_progress(
     .fetch_one(connection)
     .await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{TimeZone, Utc};
+
+    fn at(second: i64) -> chrono::DateTime<Utc> {
+        Utc.timestamp_opt(second, 0).unwrap()
+    }
+
+    #[test]
+    fn voting_is_unblocked_after_start() {
+        assert_eq!(voting_block_reason_parts(Some(at(100)), None, false), None);
+    }
+
+    #[test]
+    fn voting_without_a_start_is_blocked() {
+        assert_eq!(
+            voting_block_reason_parts(None, None, false).as_deref(),
+            Some("voting hasn't started yet")
+        );
+    }
+
+    #[test]
+    fn voting_before_a_scheduled_start_names_the_time() {
+        let reason = voting_block_reason_parts(None, Some(at(1_700_000_000)), false).unwrap();
+        assert!(reason.starts_with("voting hasn't started yet; it opens at "));
+        assert!(reason.ends_with(" UTC"));
+    }
+
+    #[test]
+    fn a_paused_season_is_blocked_after_start() {
+        assert_eq!(
+            voting_block_reason_parts(Some(at(100)), None, true).as_deref(),
+            Some("voting is paused")
+        );
+    }
+
+    #[test]
+    fn paused_before_start_reports_the_start_first() {
+        assert_eq!(
+            voting_block_reason_parts(None, None, true).as_deref(),
+            Some("voting hasn't started yet")
+        );
+    }
+
+    #[test]
+    fn pause_only_matters_once_started() {
+        assert_eq!(
+            voting_block_reason_parts(Some(at(100)), Some(at(200)), true).as_deref(),
+            Some("voting is paused")
+        );
+        assert_eq!(
+            voting_block_reason_parts(Some(at(100)), Some(at(200)), false),
+            None
+        );
+    }
+}

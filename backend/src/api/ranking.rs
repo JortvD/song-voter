@@ -444,7 +444,9 @@ fn replay_tracks(by_id: HashMap<Uuid, MatchupTrack>, votes: &[PersonalVote]) -> 
         *ratings.get_mut(&vote.track_high).expect("known track") += outcome.delta_high;
         *comparisons.get_mut(&vote.track_low).expect("known track") += 1;
         *comparisons.get_mut(&vote.track_high).expect("known track") += 1;
-        *wins.get_mut(&vote.winner).expect("known winner") += 1;
+        if let Some(wins) = wins.get_mut(&vote.winner) {
+            *wins += 1;
+        }
     }
 
     let mut ranked: Vec<RankedTrack> = by_id
@@ -479,4 +481,256 @@ fn replay_tracks(by_id: HashMap<Uuid, MatchupTrack>, votes: &[PersonalVote]) -> 
     }
 
     ranked
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn track(id: u128, title: &str, decade: Option<i32>, genre: Option<&str>) -> MatchupTrack {
+        MatchupTrack {
+            id: Uuid::from_u128(id),
+            spotify_id: format!("spotify-{id}"),
+            title: title.to_string(),
+            artists: "Artist".to_string(),
+            album: Some("Album".to_string()),
+            album_image_url: None,
+            preview_url: None,
+            duration_ms: Some(180_000),
+            release_year: decade.map(|value| value + 1),
+            decade,
+            album_id: None,
+            album_type: None,
+            total_tracks: None,
+            disc_number: None,
+            track_number: None,
+            primary_genre: genre.map(str::to_string),
+        }
+    }
+
+    fn vote(low: u128, high: u128, winner: u128) -> PersonalVote {
+        PersonalVote {
+            track_low: Uuid::from_u128(low),
+            track_high: Uuid::from_u128(high),
+            winner: Uuid::from_u128(winner),
+        }
+    }
+
+    fn by_id(tracks: Vec<MatchupTrack>) -> HashMap<Uuid, MatchupTrack> {
+        tracks.into_iter().map(|track| (track.id, track)).collect()
+    }
+
+    fn ranked(
+        id: u128,
+        title: &str,
+        rating: f64,
+        decade: Option<i32>,
+        genre: Option<&str>,
+    ) -> RankedTrack {
+        RankedTrack {
+            rank: 1,
+            track: track(id, title, decade, genre),
+            rating,
+            comparisons: 2,
+            wins: 1,
+        }
+    }
+
+    #[test]
+    fn personal_replay_ignores_tracks_without_votes() {
+        let tracks = by_id(vec![track(1, "A", None, None), track(2, "B", None, None)]);
+        let result = replay_tracks(tracks, &[]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn personal_replay_starts_at_one_thousand_and_counts_comparisons() {
+        let tracks = by_id(vec![track(1, "A", None, None), track(2, "B", None, None)]);
+        let result = replay_tracks(tracks, &[vote(1, 2, 1)]);
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].rank, 1);
+        assert_eq!(result[1].rank, 2);
+        let winner = result
+            .iter()
+            .find(|entry| entry.track.id == Uuid::from_u128(1))
+            .unwrap();
+        let loser = result
+            .iter()
+            .find(|entry| entry.track.id == Uuid::from_u128(2))
+            .unwrap();
+        assert_eq!(winner.wins, 1);
+        assert_eq!(loser.wins, 0);
+        assert_eq!(winner.comparisons, 1);
+        assert!(winner.rating > 1000.0);
+        assert!(loser.rating < 1000.0);
+    }
+
+    #[test]
+    fn personal_replay_orders_by_rating_then_wins_then_title() {
+        let tracks = by_id(vec![
+            track(1, "B", None, None),
+            track(2, "A", None, None),
+            track(3, "C", None, None),
+        ]);
+        let result = replay_tracks(tracks, &[vote(1, 2, 1), vote(1, 2, 2)]);
+        // Both tracks have one win and one loss, so the title breaks the tie.
+        assert_eq!(result[0].track.title, "A");
+        assert_eq!(result[1].track.title, "B");
+    }
+
+    #[test]
+    fn personal_replay_skips_votes_for_unknown_tracks() {
+        let tracks = by_id(vec![track(1, "A", None, None), track(2, "B", None, None)]);
+        let result = replay_tracks(tracks, &[vote(1, 99, 1)]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn personal_replay_does_not_panic_for_an_unknown_winner() {
+        let tracks = by_id(vec![track(1, "A", None, None), track(2, "B", None, None)]);
+        let result = replay_tracks(tracks, &[vote(1, 2, 99)]);
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result.iter().map(|entry| entry.wins).sum::<i32>(), 0);
+        assert_eq!(result.iter().map(|entry| entry.comparisons).sum::<i32>(), 2);
+    }
+
+    #[test]
+    fn personal_replay_is_zero_sum_between_two_tracks() {
+        let tracks = by_id(vec![track(1, "A", None, None), track(2, "B", None, None)]);
+        let result = replay_tracks(tracks, &[vote(1, 2, 2)]);
+        let total = result.iter().map(|entry| entry.rating).sum::<f64>();
+        assert!((total - 2000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn personal_replay_handles_multiple_votes_and_repeated_pairs() {
+        let tracks = by_id(vec![track(1, "A", None, None), track(2, "B", None, None)]);
+        let result = replay_tracks(tracks, &[vote(1, 2, 1), vote(1, 2, 2), vote(1, 2, 1)]);
+        let a = result
+            .iter()
+            .find(|entry| entry.track.id == Uuid::from_u128(1))
+            .unwrap();
+        let b = result
+            .iter()
+            .find(|entry| entry.track.id == Uuid::from_u128(2))
+            .unwrap();
+        assert_eq!(a.wins, 2);
+        assert_eq!(b.wins, 1);
+        assert_eq!(a.comparisons, 3);
+        assert_eq!(b.comparisons, 3);
+    }
+
+    #[test]
+    fn personal_replay_only_needs_the_tracks_it_receives() {
+        let tracks = by_id(vec![track(1, "A", None, None)]);
+        let result = replay_tracks(tracks, &[vote(1, 2, 1)]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn decade_facets_group_and_average_ratings() {
+        let entries = vec![
+            ranked(1, "A", 1000.0, Some(1990), None),
+            ranked(2, "B", 1200.0, Some(1990), None),
+            ranked(3, "C", 1100.0, Some(2000), None),
+            ranked(4, "D", 1300.0, None, None),
+        ];
+
+        let facets = build_decade_facets(&entries);
+
+        assert_eq!(facets.len(), 2);
+        assert_eq!(facets[0].value, "1990");
+        assert_eq!(facets[0].count, 2);
+        assert_eq!(facets[0].average_rating, Some(1100.0));
+        assert_eq!(facets[1].value, "2000");
+        assert_eq!(facets[1].count, 1);
+    }
+
+    #[test]
+    fn decade_facets_are_sorted_numerically() {
+        let entries = vec![
+            ranked(1, "A", 1000.0, Some(2020), None),
+            ranked(2, "B", 1000.0, Some(1980), None),
+            ranked(3, "C", 1000.0, Some(2000), None),
+        ];
+        let values = build_decade_facets(&entries)
+            .into_iter()
+            .map(|facet| facet.value)
+            .collect::<Vec<_>>();
+        assert_eq!(values, vec!["1980", "2000", "2020"]);
+    }
+
+    #[test]
+    fn decade_facets_are_empty_without_decades() {
+        assert!(build_decade_facets(&[]).is_empty());
+        assert!(build_decade_facets(&[ranked(1, "A", 1000.0, None, None)]).is_empty());
+    }
+
+    #[test]
+    fn genre_facets_group_and_sort_by_count_then_name() {
+        let entries = vec![
+            ranked(1, "A", 1000.0, None, Some("Rock")),
+            ranked(2, "B", 1200.0, None, Some("Rock")),
+            ranked(3, "C", 1100.0, None, Some("Pop")),
+            ranked(4, "D", 1400.0, None, Some("Jazz")),
+        ];
+
+        let facets = build_genre_facets(&entries);
+
+        assert_eq!(facets.len(), 3);
+        assert_eq!(facets[0].value, "Rock");
+        assert_eq!(facets[0].count, 2);
+        assert_eq!(facets[0].average_rating, Some(1100.0));
+        assert_eq!(facets[1].value, "Jazz");
+        assert_eq!(facets[1].count, 1);
+        assert_eq!(facets[2].value, "Pop");
+    }
+
+    #[test]
+    fn genre_facets_are_empty_without_genres() {
+        assert!(build_genre_facets(&[]).is_empty());
+        assert!(build_genre_facets(&[ranked(1, "A", 1000.0, Some(1990), None)]).is_empty());
+    }
+
+    #[test]
+    fn genre_facets_keep_distinct_names() {
+        let entries = vec![
+            ranked(1, "A", 1000.0, None, Some("Pop")),
+            ranked(2, "B", 1000.0, None, Some("Rock")),
+        ];
+        assert_eq!(build_genre_facets(&entries).len(), 2);
+    }
+
+    #[test]
+    fn rank_is_one_based_for_every_entry() {
+        let tracks = by_id(vec![
+            track(1, "A", None, None),
+            track(2, "B", None, None),
+            track(3, "C", None, None),
+        ]);
+        let result = replay_tracks(tracks, &[vote(1, 2, 1), vote(2, 3, 2)]);
+        assert_eq!(
+            result.iter().map(|entry| entry.rank).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn personal_replay_uses_zero_sum_deltas() {
+        let tracks = by_id(vec![track(1, "A", None, None), track(2, "B", None, None)]);
+        let after_one = replay_tracks(tracks.clone(), &[vote(1, 2, 1)]);
+        let a_after = after_one
+            .iter()
+            .find(|entry| entry.track.id == Uuid::from_u128(1))
+            .unwrap()
+            .rating;
+        let b_after = after_one
+            .iter()
+            .find(|entry| entry.track.id == Uuid::from_u128(2))
+            .unwrap()
+            .rating;
+        assert!((a_after + b_after - 2000.0).abs() < 1e-9);
+    }
 }

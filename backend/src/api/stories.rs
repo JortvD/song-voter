@@ -2067,7 +2067,7 @@ fn story_track(row: &FeaturedTrackRow, role: &'static str) -> StoryTrack {
 /// Formats an integer with thousands separators for the story cards.
 fn format_count(value: i64) -> String {
     let negative = value < 0;
-    let digits = value.abs().to_string();
+    let digits = value.unsigned_abs().to_string();
     let mut output = String::with_capacity(digits.len() + digits.len() / 3);
 
     for (index, character) in digits.chars().enumerate() {
@@ -2190,5 +2190,303 @@ mod tests {
         assert_eq!(format_duration_seconds(0.0), "—");
         assert_eq!(format_duration_seconds(90.0), "1m");
         assert_eq!(format_duration_seconds(3_660.0), "1h 1m");
+    }
+
+    #[test]
+    fn formats_the_smallest_i64_without_overflow() {
+        assert_eq!(format_count(i64::MIN), "-9,223,372,036,854,775,808");
+    }
+
+    #[test]
+    fn formats_every_group_boundary() {
+        assert_eq!(format_count(1), "1");
+        assert_eq!(format_count(12), "12");
+        assert_eq!(format_count(123), "123");
+        assert_eq!(format_count(1_234), "1,234");
+        assert_eq!(format_count(12_345), "12,345");
+        assert_eq!(format_count(123_456), "123,456");
+        assert_eq!(format_count(1_234_567_890), "1,234,567,890");
+    }
+
+    #[test]
+    fn rounds_scores_half_away_from_zero() {
+        assert_eq!(format_score(1_000.4), "1,000");
+        assert_eq!(format_score(1_000.5), "1,001");
+        assert_eq!(format_score(-1_000.5), "-1,001");
+        assert_eq!(format_score(f64::NAN), "0");
+    }
+
+    #[test]
+    fn formats_runtime_edges() {
+        assert_eq!(format_runtime(-1), "—");
+        assert_eq!(format_runtime(59_999), "0m");
+        assert_eq!(format_runtime(60_000), "1m");
+        assert_eq!(format_runtime(3_599_999), "59m");
+        assert_eq!(format_runtime(3_600_000), "1h 00m");
+        assert_eq!(format_runtime(7_260_000), "2h 01m");
+    }
+
+    fn album(name: &str, songs: i64, avg: f64, deviation: f64) -> AlbumStats {
+        AlbumStats {
+            name: name.to_string(),
+            artists: None,
+            image_url: None,
+            song_count: songs,
+            avg_rating: avg,
+            best_id: Uuid::from_u128(1),
+            worst_id: Uuid::from_u128(2),
+            comparisons: 10,
+            wins: 5,
+            ratings: vec![avg - deviation, avg + deviation],
+        }
+    }
+
+    fn artist(
+        name: &str,
+        songs: i64,
+        avg: f64,
+        best: f64,
+        comparisons: i64,
+        deviation: f64,
+    ) -> ArtistStats {
+        ArtistStats {
+            name: name.to_string(),
+            image_url: None,
+            song_count: songs,
+            avg_rating: avg,
+            best_rating: best,
+            best_id: Uuid::from_u128(1),
+            worst_id: Uuid::from_u128(2),
+            comparisons,
+            wins: 5,
+            ratings: vec![avg - deviation, avg + deviation],
+        }
+    }
+
+    fn decade(decade: i32, songs: i64, avg: f64, deviation: f64) -> DecadeStats {
+        DecadeStats {
+            decade,
+            image_url: None,
+            song_count: songs,
+            avg_rating: avg,
+            best_id: Uuid::from_u128(1),
+            worst_id: Uuid::from_u128(2),
+            comparisons: 10,
+            wins: 5,
+            ratings: vec![avg - deviation, avg + deviation],
+        }
+    }
+
+    #[test]
+    fn album_mad_is_mean_absolute_deviation() {
+        assert_eq!(album("A", 2, 1000.0, 80.0).mad(), 80.0);
+    }
+
+    #[test]
+    fn most_divisive_album_requires_at_least_two_songs() {
+        let rows = vec![
+            album("single", 1, 1000.0, 500.0),
+            album("pair", 2, 1000.0, 10.0),
+        ];
+        assert_eq!(most_divisive_album(&rows).unwrap().name, "pair");
+        assert!(most_divisive_album(&[]).is_none());
+    }
+
+    #[test]
+    fn most_divisive_album_prefers_the_larger_mean_deviation() {
+        let rows = vec![
+            album("narrow", 5, 1000.0, 10.0),
+            album("wide", 2, 1000.0, 100.0),
+        ];
+        assert_eq!(most_divisive_album(&rows).unwrap().name, "wide");
+    }
+
+    #[test]
+    fn most_divisive_album_breaks_ties_by_song_count() {
+        let rows = vec![
+            album("few", 2, 1000.0, 50.0),
+            album("many", 9, 1000.0, 50.0),
+        ];
+        assert_eq!(most_divisive_album(&rows).unwrap().name, "many");
+    }
+
+    #[test]
+    fn highest_rated_album_requires_three_songs() {
+        let rows = vec![
+            album("single", 1, 4000.0, 0.0),
+            album("triple", 3, 1010.0, 10.0),
+        ];
+        assert_eq!(highest_rated_album(&rows).unwrap().name, "triple");
+    }
+
+    #[test]
+    fn highest_rated_album_prefers_average_then_wins() {
+        let mut first = album("first", 3, 1100.0, 0.0);
+        let mut second = album("second", 3, 1100.0, 0.0);
+        first.wins = 1;
+        second.wins = 9;
+        assert_eq!(
+            highest_rated_album(&[first, second]).unwrap().name,
+            "second"
+        );
+    }
+
+    #[test]
+    fn artist_one_hit_gap_is_best_minus_average() {
+        assert_eq!(
+            artist("A", 3, 1000.0, 1120.0, 20, 40.0).one_hit_gap(),
+            120.0
+        );
+    }
+
+    #[test]
+    fn most_divisive_artist_requires_three_songs() {
+        let rows = vec![
+            artist("duo", 2, 1000.0, 2000.0, 20, 500.0),
+            artist("trio", 3, 1000.0, 1010.0, 20, 10.0),
+        ];
+        assert_eq!(most_divisive_artist(&rows).unwrap().name, "trio");
+    }
+
+    #[test]
+    fn most_divisive_artist_prefers_the_larger_mean_deviation() {
+        let rows = vec![
+            artist("narrow", 3, 1000.0, 1010.0, 20, 10.0),
+            artist("wide", 3, 1000.0, 1200.0, 20, 100.0),
+        ];
+        assert_eq!(most_divisive_artist(&rows).unwrap().name, "wide");
+    }
+
+    #[test]
+    fn highest_rated_artist_requires_three_songs_and_prefers_average() {
+        let rows = vec![
+            artist("single", 1, 9999.0, 9999.0, 20, 0.0),
+            artist("low", 3, 1000.0, 1000.0, 20, 0.0),
+            artist("high", 3, 1100.0, 1100.0, 20, 0.0),
+        ];
+        assert_eq!(highest_rated_artist(&rows).unwrap().name, "high");
+    }
+
+    #[test]
+    fn one_hit_wonder_requires_three_songs_and_ten_comparisons() {
+        let rows = vec![
+            artist("small", 3, 1000.0, 2000.0, 9, 100.0),
+            artist("eligible", 3, 1000.0, 1200.0, 10, 100.0),
+        ];
+        assert_eq!(one_hit_wonder(&rows).unwrap().name, "eligible");
+    }
+
+    #[test]
+    fn one_hit_wonder_prefers_the_biggest_gap() {
+        let rows = vec![
+            artist("modest", 3, 1000.0, 1050.0, 20, 25.0),
+            artist("huge", 3, 1000.0, 1400.0, 20, 200.0),
+        ];
+        assert_eq!(one_hit_wonder(&rows).unwrap().name, "huge");
+    }
+
+    #[test]
+    fn best_decade_requires_three_songs() {
+        let rows = vec![decade(1980, 2, 5000.0, 0.0), decade(1990, 3, 1010.0, 0.0)];
+        assert_eq!(best_decade(&rows).unwrap().decade, 1990);
+    }
+
+    #[test]
+    fn best_decade_prefers_average_then_wins() {
+        let mut older = decade(1980, 3, 1100.0, 0.0);
+        let mut newer = decade(1990, 3, 1100.0, 0.0);
+        older.wins = 1;
+        newer.wins = 8;
+        assert_eq!(best_decade(&[older, newer]).unwrap().decade, 1990);
+    }
+
+    #[test]
+    fn most_divisive_decade_requires_five_songs() {
+        let rows = vec![
+            decade(1980, 4, 1000.0, 500.0),
+            decade(1990, 5, 1000.0, 10.0),
+        ];
+        assert_eq!(most_divisive_decade(&rows).unwrap().decade, 1990);
+    }
+
+    #[test]
+    fn most_divisive_decade_prefers_the_larger_mean_deviation() {
+        let rows = vec![
+            decade(1980, 5, 1000.0, 10.0),
+            decade(1990, 5, 1000.0, 100.0),
+        ];
+        assert_eq!(most_divisive_decade(&rows).unwrap().decade, 1990);
+    }
+
+    #[test]
+    fn superlatives_return_none_for_empty_rows() {
+        assert!(most_divisive_album(&[]).is_none());
+        assert!(highest_rated_album(&[]).is_none());
+        assert!(most_divisive_artist(&[]).is_none());
+        assert!(highest_rated_artist(&[]).is_none());
+        assert!(one_hit_wonder(&[]).is_none());
+        assert!(best_decade(&[]).is_none());
+        assert!(most_divisive_decade(&[]).is_none());
+    }
+
+    fn featured(id: Uuid) -> FeaturedTrackRow {
+        FeaturedTrackRow {
+            id,
+            title: "Title".to_string(),
+            artists: "Artist".to_string(),
+            album: Some("Album".to_string()),
+            album_image_url: Some("image".to_string()),
+            rating: 1234.5,
+        }
+    }
+
+    #[test]
+    fn one_track_is_omitted_when_not_featured() {
+        let map = HashMap::new();
+        assert!(one_track(&map, Uuid::from_u128(1), "top").is_empty());
+    }
+
+    #[test]
+    fn one_track_maps_the_featured_row() {
+        let id = Uuid::from_u128(1);
+        let map = HashMap::from([(id, featured(id))]);
+        let tracks = one_track(&map, id, "top");
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].role, "top");
+        assert_eq!(tracks[0].id, id);
+        assert_eq!(tracks[0].rating, 1234.5);
+    }
+
+    #[test]
+    fn two_tracks_keeps_the_requested_order_and_skips_missing() {
+        let first = Uuid::from_u128(1);
+        let second = Uuid::from_u128(2);
+        let map = HashMap::from([(first, featured(first)), (second, featured(second))]);
+
+        let tracks = two_tracks(&map, first, second, "best", "worst");
+        assert_eq!(tracks.len(), 2);
+        assert_eq!(tracks[0].role, "best");
+        assert_eq!(tracks[1].role, "worst");
+
+        let only_second = two_tracks(&map, Uuid::from_u128(9), second, "best", "worst");
+        assert_eq!(only_second.len(), 1);
+        assert_eq!(only_second[0].id, second);
+    }
+
+    #[test]
+    fn story_track_copies_public_fields() {
+        let row = featured(Uuid::from_u128(3));
+        let track = story_track(&row, "standout");
+        assert_eq!(track.role, "standout");
+        assert_eq!(track.title, "Title");
+        assert_eq!(track.album.as_deref(), Some("Album"));
+        assert_eq!(track.album_image_url.as_deref(), Some("image"));
+    }
+
+    #[test]
+    fn stat_builds_a_label_value_pair() {
+        let value = stat("Average", "1,000".to_string());
+        assert_eq!(value.label, "Average");
+        assert_eq!(value.value, "1,000");
     }
 }

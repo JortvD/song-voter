@@ -290,6 +290,210 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
+    #[tokio::test]
+    async fn cached_values_expire_after_the_ttl() {
+        let cache = ResponseCache::new(8);
+        let calls = Arc::new(AtomicUsize::new(0));
+
+        for _ in 0..2 {
+            let calls = calls.clone();
+            cache
+                .get_or_compute(
+                    "short".to_string(),
+                    Duration::from_millis(20),
+                    || async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        Ok::<Value, ApiError>(serde_json::json!({"ok": true}))
+                    },
+                )
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn failed_computations_are_not_cached() {
+        let cache = ResponseCache::new(8);
+        let calls = Arc::new(AtomicUsize::new(0));
+
+        for attempt in 0..2 {
+            let calls = calls.clone();
+            let result = cache
+                .get_or_compute(
+                    "fails".to_string(),
+                    Duration::from_secs(60),
+                    || async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        Err::<Value, ApiError>(ApiError::service_unavailable("nope"))
+                    },
+                )
+                .await;
+            assert!(result.is_err(), "attempt {attempt}");
+        }
+
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn a_failed_flight_does_not_block_the_next_request() {
+        let cache = ResponseCache::new(8);
+        let calls = Arc::new(AtomicUsize::new(0));
+
+        let calls_for_failure = calls.clone();
+        let failure = cache
+            .get_or_compute(
+                "retry".to_string(),
+                Duration::from_secs(60),
+                || async move {
+                    calls_for_failure.fetch_add(1, Ordering::SeqCst);
+                    Err::<Value, ApiError>(ApiError::bad_request("first"))
+                },
+            )
+            .await;
+        assert!(failure.is_err());
+
+        let calls_for_success = calls.clone();
+        let value = cache
+            .get_or_compute(
+                "retry".to_string(),
+                Duration::from_secs(60),
+                || async move {
+                    calls_for_success.fetch_add(1, Ordering::SeqCst);
+                    Ok::<Value, ApiError>(serde_json::json!({"attempt": 2}))
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(value["attempt"], 2);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn a_clear_during_computation_discards_the_result() {
+        let cache = Arc::new(ResponseCache::new(8));
+        let cache_for_task = cache.clone();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_for_task = calls.clone();
+
+        let handle = tokio::spawn(async move {
+            cache_for_task
+                .get_or_compute("race".to_string(), Duration::from_secs(60), || async move {
+                    calls_for_task.fetch_add(1, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(30)).await;
+                    Ok::<Value, ApiError>(serde_json::json!({"stale": true}))
+                })
+                .await
+                .unwrap()
+        });
+
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        cache.clear();
+        handle.await.unwrap();
+
+        let calls_for_second = calls.clone();
+        let value = cache
+            .get_or_compute("race".to_string(), Duration::from_secs(60), || async move {
+                calls_for_second.fetch_add(1, Ordering::SeqCst);
+                Ok::<Value, ApiError>(serde_json::json!({"stale": false}))
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(value["stale"], false);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn a_full_cache_drops_old_entries_instead_of_growing() {
+        let cache = ResponseCache::new(2);
+        for index in 0..3 {
+            cache
+                .get_or_compute(
+                    format!("key-{index}"),
+                    Duration::from_secs(60),
+                    || async move { Ok::<Value, ApiError>(serde_json::json!({"index": index})) },
+                )
+                .await
+                .unwrap();
+        }
+
+        // The third insert cleared the full cache; the newest entry remains.
+        let value = cache
+            .get_or_compute("key-2".to_string(), Duration::from_secs(60), || async {
+                Ok::<Value, ApiError>(serde_json::json!({"computed": true}))
+            })
+            .await
+            .unwrap();
+        assert_eq!(value["index"], 2);
+    }
+
+    #[test]
+    fn auth_cache_entries_expire() {
+        let cache = AuthUserCache::new(8);
+        let id = Uuid::new_v4();
+        let user = User {
+            id,
+            username: "voter".to_string(),
+            password_hash: String::new(),
+            is_admin: false,
+            created_at: chrono::Utc::now(),
+            disabled_at: None,
+            session_version: 0,
+        };
+        cache.insert(user, Duration::from_millis(1));
+        std::thread::sleep(Duration::from_millis(5));
+        assert!(cache.get(id).is_none());
+    }
+
+    #[test]
+    fn auth_cache_clear_removes_every_user() {
+        let cache = AuthUserCache::new(8);
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        for (id, name) in [(first, "one"), (second, "two")] {
+            cache.insert(
+                User {
+                    id,
+                    username: name.to_string(),
+                    password_hash: String::new(),
+                    is_admin: false,
+                    created_at: chrono::Utc::now(),
+                    disabled_at: None,
+                    session_version: 0,
+                },
+                Duration::from_secs(60),
+            );
+        }
+        cache.clear();
+        assert!(cache.get(first).is_none());
+        assert!(cache.get(second).is_none());
+    }
+
+    #[test]
+    fn auth_cache_stays_bounded() {
+        let cache = AuthUserCache::new(2);
+        for index in 0..3 {
+            let id = Uuid::from_u128(index + 1);
+            cache.insert(
+                User {
+                    id,
+                    username: format!("voter-{index}"),
+                    password_hash: String::new(),
+                    is_admin: false,
+                    created_at: chrono::Utc::now(),
+                    disabled_at: None,
+                    session_version: 0,
+                },
+                Duration::from_secs(60),
+            );
+        }
+        assert!(cache.get(Uuid::from_u128(3)).is_some());
+    }
+
     #[test]
     fn auth_cache_invalidation_removes_the_user() {
         let cache = AuthUserCache::new(8);

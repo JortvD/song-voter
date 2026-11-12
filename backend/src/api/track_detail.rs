@@ -521,4 +521,20 @@ mod tests {
     fn ratios_are_fractions_of_the_duel_count() {
         assert_eq!(ratio(3, 4), Some(0.75));
     }
+
+    #[test]
+    fn ratios_return_none_for_a_negative_denominator() {
+        assert_eq!(ratio(3, -1), None);
+    }
+
+    #[test]
+    fn ratios_handle_zero_and_full_agreement() {
+        assert_eq!(ratio(0, 5), Some(0.0));
+        assert_eq!(ratio(5, 5), Some(1.0));
+    }
+
+    #[test]
+    fn ratios_keep_fractional_precision() {
+        assert_eq!(ratio(1, 3), Some(1.0 / 3.0));
+    }
 }

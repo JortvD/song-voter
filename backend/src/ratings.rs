@@ -299,4 +299,290 @@ mod tests {
         assert_eq!(result.tracks[&low].comparisons, 0);
         assert_eq!(result.tracks[&high].comparisons, 0);
     }
+
+    #[test]
+    fn replay_of_no_votes_returns_initial_states() {
+        let low = Uuid::from_u128(1);
+        let high = Uuid::from_u128(2);
+
+        let result = replay_votes(&[low, high], &[]);
+
+        assert!(result.votes.is_empty());
+        for id in [low, high] {
+            let state = result.tracks[&id];
+            assert_eq!(state.rating, elo::INITIAL_RATING);
+            assert_eq!(state.comparisons, 0);
+            assert_eq!(state.wins, 0);
+            assert_eq!(state.last_compared_at, None);
+        }
+    }
+
+    #[test]
+    fn replay_with_no_tracks_ignores_every_vote() {
+        let low = Uuid::from_u128(1);
+        let high = Uuid::from_u128(2);
+        let votes = vec![vote(1, low, high, low, 1)];
+
+        let result = replay_votes(&[], &votes);
+
+        assert!(result.tracks.is_empty());
+        assert!(result.votes.is_empty());
+    }
+
+    #[test]
+    fn replay_records_the_k_factor_and_comparison_snapshots() {
+        let low = Uuid::from_u128(1);
+        let high = Uuid::from_u128(2);
+        let votes = vec![
+            vote(1, low, high, low, 1),
+            vote(2, low, high, high, 2),
+            vote(3, low, high, low, 3),
+        ];
+
+        let result = replay_votes(&[low, high], &votes);
+
+        assert_eq!(result.votes[0].comparisons_low_before, 0);
+        assert_eq!(result.votes[0].comparisons_high_before, 0);
+        assert_eq!(result.votes[1].comparisons_low_before, 1);
+        assert_eq!(result.votes[1].comparisons_high_before, 1);
+        assert_eq!(result.votes[2].comparisons_low_before, 2);
+        assert_eq!(result.votes[2].comparisons_high_before, 2);
+        assert_eq!(result.votes[0].k_factor, 40.0);
+        assert_eq!(result.votes[1].k_factor, 39.5);
+        assert_eq!(result.votes[2].k_factor, 39.0);
+    }
+
+    #[test]
+    fn replay_ledger_matches_the_accumulated_track_states() {
+        let low = Uuid::from_u128(1);
+        let high = Uuid::from_u128(2);
+        let votes = vec![
+            vote(1, low, high, low, 10),
+            vote(2, low, high, high, 20),
+            vote(3, low, high, high, 25),
+        ];
+
+        let result = replay_votes(&[low, high], &votes);
+        let last = result.votes.last().unwrap();
+
+        assert!(
+            (last.rating_low_before + last.delta_low - result.tracks[&low].rating).abs() < 1e-9
+        );
+        assert!(
+            (last.rating_high_before + last.delta_high - result.tracks[&high].rating).abs() < 1e-9
+        );
+        assert_eq!(result.tracks[&low].comparisons, 3);
+        assert_eq!(result.tracks[&high].comparisons, 3);
+    }
+
+    #[test]
+    fn replay_is_zero_sum_for_every_vote() {
+        let low = Uuid::from_u128(1);
+        let high = Uuid::from_u128(2);
+        let votes = vec![
+            vote(1, low, high, low, 1),
+            vote(2, low, high, high, 2),
+            vote(3, low, high, high, 3),
+            vote(4, low, high, low, 4),
+        ];
+
+        let result = replay_votes(&[low, high], &votes);
+
+        for vote in result.votes {
+            assert!((vote.delta_low + vote.delta_high).abs() < 1e-9);
+        }
+        let total = result.tracks[&low].rating + result.tracks[&high].rating;
+        assert!((total - 2.0 * elo::INITIAL_RATING).abs() < 1e-9);
+    }
+
+    #[test]
+    fn replay_uses_created_at_for_last_compared() {
+        let low = Uuid::from_u128(1);
+        let high = Uuid::from_u128(2);
+        let votes = vec![
+            vote(1, low, high, low, 100),
+            vote(2, low, high, high, 500),
+            vote(3, low, high, high, 300),
+        ];
+
+        let result = replay_votes(&[low, high], &votes);
+
+        assert_eq!(
+            result.tracks[&low].last_compared_at,
+            Some(DateTime::from_timestamp(300, 0).unwrap())
+        );
+        assert_eq!(
+            result.tracks[&high].last_compared_at,
+            Some(DateTime::from_timestamp(300, 0).unwrap())
+        );
+    }
+
+    #[test]
+    fn replay_counts_wins_by_winner_identity() {
+        let low = Uuid::from_u128(1);
+        let high = Uuid::from_u128(2);
+        let votes = vec![
+            vote(1, low, high, low, 1),
+            vote(2, low, high, low, 2),
+            vote(3, low, high, high, 3),
+        ];
+
+        let result = replay_votes(&[low, high], &votes);
+
+        assert_eq!(result.tracks[&low].wins, 2);
+        assert_eq!(result.tracks[&high].wins, 1);
+    }
+
+    #[test]
+    fn replay_ignores_a_third_track_as_winner_without_panicking() {
+        let low = Uuid::from_u128(1);
+        let high = Uuid::from_u128(2);
+        let outsider = Uuid::from_u128(3);
+        let votes = vec![vote(1, low, high, outsider, 1)];
+
+        let result = replay_votes(&[low, high], &votes);
+
+        assert_eq!(result.votes.len(), 1);
+        assert_eq!(result.tracks[&low].wins, 0);
+        assert_eq!(result.tracks[&high].wins, 1);
+    }
+
+    #[test]
+    fn replay_orders_results_exactly_as_supplied() {
+        let low = Uuid::from_u128(1);
+        let high = Uuid::from_u128(2);
+        let votes = vec![
+            vote(9, low, high, high, 50),
+            vote(2, low, high, low, 10),
+            vote(5, low, high, low, 30),
+        ];
+
+        let result = replay_votes(&[low, high], &votes);
+
+        assert_eq!(
+            result.votes.iter().map(|vote| vote.id).collect::<Vec<_>>(),
+            vec![Uuid::from_u128(9), Uuid::from_u128(2), Uuid::from_u128(5)]
+        );
+    }
+
+    #[test]
+    fn replay_handles_multiple_disjoint_pairs_independently() {
+        let a = Uuid::from_u128(1);
+        let b = Uuid::from_u128(2);
+        let c = Uuid::from_u128(3);
+        let d = Uuid::from_u128(4);
+        let votes = vec![
+            vote(1, a, b, a, 1),
+            vote(2, c, d, d, 2),
+            vote(3, a, b, b, 3),
+        ];
+
+        let result = replay_votes(&[a, b, c, d], &votes);
+
+        assert_eq!(result.tracks[&c].comparisons, 1);
+        assert_eq!(result.tracks[&d].comparisons, 1);
+        assert!(result.tracks[&d].rating > elo::INITIAL_RATING);
+        assert!(result.tracks[&c].rating < elo::INITIAL_RATING);
+        assert_eq!(result.tracks[&a].comparisons, 2);
+        assert_eq!(result.tracks[&b].comparisons, 2);
+    }
+
+    #[test]
+    fn replay_is_deterministic() {
+        let low = Uuid::from_u128(1);
+        let high = Uuid::from_u128(2);
+        let votes = vec![
+            vote(1, low, high, low, 1),
+            vote(2, low, high, high, 2),
+            vote(3, low, high, low, 3),
+        ];
+
+        let first = replay_votes(&[low, high], &votes);
+        let second = replay_votes(&[low, high], &votes);
+
+        assert_eq!(first.tracks[&low].rating, second.tracks[&low].rating);
+        assert_eq!(first.tracks[&high].rating, second.tracks[&high].rating);
+        assert_eq!(first.votes.len(), second.votes.len());
+    }
+
+    #[test]
+    fn replay_keeps_tracks_that_never_voted_at_initial_rating() {
+        let low = Uuid::from_u128(1);
+        let high = Uuid::from_u128(2);
+        let idle = Uuid::from_u128(3);
+        let votes = vec![vote(1, low, high, low, 1)];
+
+        let result = replay_votes(&[low, high, idle], &votes);
+
+        assert_eq!(result.tracks[&idle].rating, elo::INITIAL_RATING);
+        assert_eq!(result.tracks[&idle].comparisons, 0);
+        assert_eq!(result.tracks[&idle].wins, 0);
+    }
+
+    #[test]
+    fn replay_handles_identical_timestamps() {
+        let low = Uuid::from_u128(1);
+        let high = Uuid::from_u128(2);
+        let votes = vec![vote(1, low, high, low, 100), vote(2, low, high, high, 100)];
+
+        let result = replay_votes(&[low, high], &votes);
+
+        assert_eq!(result.votes.len(), 2);
+        assert_eq!(result.tracks[&low].comparisons, 2);
+    }
+
+    #[test]
+    fn replay_handles_many_votes_without_drifting_off_finite_values() {
+        let low = Uuid::from_u128(1);
+        let high = Uuid::from_u128(2);
+        let votes = (0..1_000)
+            .map(|index| {
+                let winner = if index % 3 == 0 { high } else { low };
+                vote((index % 255) as u8, low, high, winner, index as i64)
+            })
+            .collect::<Vec<_>>();
+
+        let result = replay_votes(&[low, high], &votes);
+
+        assert_eq!(result.votes.len(), 1_000);
+        assert!(result.tracks[&low].rating.is_finite());
+        assert!(result.tracks[&high].rating.is_finite());
+        assert_eq!(result.tracks[&low].comparisons, 1_000);
+        assert_eq!(result.tracks[&high].comparisons, 1_000);
+    }
+
+    #[test]
+    fn replay_recomputes_votes_after_a_deleted_vote() {
+        let low = Uuid::from_u128(1);
+        let high = Uuid::from_u128(2);
+        let votes = vec![vote(1, low, high, low, 1), vote(2, low, high, high, 2)];
+
+        let full = replay_votes(&[low, high], &votes);
+        let without_first = replay_votes(&[low, high], &votes[1..]);
+
+        assert_eq!(full.tracks[&low].wins, 1);
+        assert_eq!(without_first.tracks[&low].wins, 0);
+        assert_eq!(without_first.tracks[&high].wins, 1);
+        assert_eq!(
+            without_first.votes[0].rating_low_before,
+            elo::INITIAL_RATING
+        );
+    }
+
+    #[test]
+    fn replay_preserves_vote_ids_and_order_when_skipping_missing_tracks() {
+        let low = Uuid::from_u128(1);
+        let high = Uuid::from_u128(2);
+        let missing = Uuid::from_u128(9);
+        let votes = vec![
+            vote(1, low, missing, low, 1),
+            vote(2, low, high, low, 2),
+            vote(3, missing, high, high, 3),
+        ];
+
+        let result = replay_votes(&[low, high], &votes);
+
+        assert_eq!(result.votes.len(), 1);
+        assert_eq!(result.votes[0].id, Uuid::from_u128(2));
+    }
 }

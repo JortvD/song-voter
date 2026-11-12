@@ -1017,3 +1017,441 @@ async fn crowd_inner(state: &AppState, playlist_id: Uuid) -> Result<CrowdRespons
         tiredness,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::analytics::VoterFlags;
+    use chrono::{TimeZone, Utc};
+
+    fn at(second: i64) -> DateTime<Utc> {
+        Utc.timestamp_opt(second, 0).unwrap()
+    }
+
+    fn config() -> StatsConfig {
+        StatsConfig {
+            session_gap_minutes: 15,
+            fast_decision_seconds: 1.5,
+            upset_threshold_pct: 35.0,
+            side_bias_margin_pct: 15.0,
+            low_agreement_pct: 55.0,
+            min_votes_for_flags: 3,
+            target_duels_per_song: 30.0,
+        }
+    }
+
+    fn user(id: u128, name: &str) -> VoterBase {
+        VoterBase {
+            id: Uuid::from_u128(id),
+            username: name.to_string(),
+            is_admin: false,
+            disabled_at: None,
+            created_at: at(0),
+        }
+    }
+
+    fn obs(
+        user_id: u128,
+        seen: i64,
+        voted: Option<i64>,
+        winner: Option<u128>,
+        flip: bool,
+    ) -> UserObservation {
+        UserObservation {
+            user_id: Uuid::from_u128(user_id),
+            seen_at: at(seen),
+            voted_at: voted.map(at),
+            winner: winner.map(Uuid::from_u128),
+            served_flip: flip,
+            track_low: Uuid::from_u128(1),
+            track_high: Uuid::from_u128(2),
+        }
+    }
+
+    #[test]
+    fn agreement_requires_a_winner_and_both_ratings() {
+        let ratings = HashMap::from([(Uuid::from_u128(1), 1100.0), (Uuid::from_u128(2), 900.0)]);
+        assert_eq!(agreement_for(&obs(1, 0, None, None, false), &ratings), None);
+        assert_eq!(
+            agreement_for(&obs(1, 0, Some(1), Some(99), false), &ratings),
+            None
+        );
+        assert_eq!(
+            agreement_for(&obs(1, 0, Some(1), Some(1), false), &ratings),
+            Some(true)
+        );
+        assert_eq!(
+            agreement_for(&obs(1, 0, Some(1), Some(2), false), &ratings),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn agreement_ignores_equal_ratings() {
+        let ratings = HashMap::from([(Uuid::from_u128(1), 1000.0), (Uuid::from_u128(2), 1000.0)]);
+        assert_eq!(
+            agreement_for(&obs(1, 0, Some(1), Some(1), false), &ratings),
+            None
+        );
+    }
+
+    #[test]
+    fn side_for_maps_the_served_orientation() {
+        assert_eq!(side_for(&obs(1, 0, Some(1), Some(1), false)), Some(Side::A));
+        assert_eq!(side_for(&obs(1, 0, Some(1), Some(1), true)), Some(Side::B));
+        assert_eq!(side_for(&obs(1, 0, Some(1), Some(2), false)), Some(Side::B));
+        assert_eq!(side_for(&obs(1, 0, Some(1), Some(2), true)), Some(Side::A));
+        assert_eq!(side_for(&obs(1, 0, None, None, false)), None);
+    }
+
+    #[test]
+    fn compute_stats_keeps_users_without_observations() {
+        let stats = compute_voter_stats(&[user(1, "quiet")], &[], &HashMap::new(), &config());
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0].votes, 0);
+        assert_eq!(stats[0].duels, 0);
+        assert_eq!(stats[0].sessions, 0);
+        assert_eq!(stats[0].avg_duels_per_session, 0.0);
+        assert!(!stats[0].flags.any());
+    }
+
+    #[test]
+    fn compute_stats_counts_votes_and_skips() {
+        let observations = vec![
+            obs(1, 0, Some(1), Some(1), false),
+            obs(1, 10, None, None, false),
+            obs(1, 20, Some(1), Some(2), false),
+        ];
+        let stats = compute_voter_stats(
+            &[user(1, "voter")],
+            &observations,
+            &HashMap::new(),
+            &config(),
+        );
+        assert_eq!(stats[0].duels, 3);
+        assert_eq!(stats[0].votes, 2);
+        assert!((stats[0].no_vote_rate.unwrap() - 100.0 / 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn compute_stats_groups_observations_by_user() {
+        let observations = vec![
+            obs(1, 0, Some(1), Some(1), false),
+            obs(2, 0, Some(1), Some(1), false),
+            obs(1, 10, Some(1), Some(1), false),
+        ];
+        let users = [user(1, "one"), user(2, "two")];
+        let stats = compute_voter_stats(&users, &observations, &HashMap::new(), &config());
+        assert_eq!(stats[0].votes, 2);
+        assert_eq!(stats[1].votes, 1);
+    }
+
+    #[test]
+    fn compute_stats_splits_sessions_on_the_configured_gap() {
+        let observations = vec![
+            obs(1, 0, Some(1), Some(1), false),
+            obs(1, 60, Some(1), Some(1), false),
+            obs(1, 60 + 15 * 60, Some(1), Some(1), false),
+            obs(1, 60 + 15 * 60 + 901, Some(1), Some(1), false),
+        ];
+        let stats = compute_voter_stats(
+            &[user(1, "voter")],
+            &observations,
+            &HashMap::new(),
+            &config(),
+        );
+        assert_eq!(stats[0].sessions, 2);
+        assert_eq!(stats[0].avg_duels_per_session, 2.0);
+    }
+
+    #[test]
+    fn compute_stats_ignores_idle_and_negative_decision_times() {
+        let mut idle = obs(1, 0, Some(1000), Some(1), false);
+        idle.seen_at = at(0);
+        let observations = vec![idle, obs(1, 2000, Some(2001), Some(1), false)];
+        let stats = compute_voter_stats(
+            &[user(1, "voter")],
+            &observations,
+            &HashMap::new(),
+            &config(),
+        );
+        assert_eq!(stats[0].median_decision_seconds, Some(1.0));
+    }
+
+    #[test]
+    fn compute_stats_calculates_side_bias() {
+        let observations = vec![
+            obs(1, 0, Some(1), Some(1), false),
+            obs(1, 10, Some(1), Some(1), false),
+            obs(1, 20, Some(1), Some(2), false),
+        ];
+        let stats = compute_voter_stats(
+            &[user(1, "voter")],
+            &observations,
+            &HashMap::new(),
+            &config(),
+        );
+        assert!((stats[0].side_bias_pct.unwrap() - 200.0 / 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn compute_stats_calculates_agreement_percentage() {
+        let ratings = HashMap::from([(Uuid::from_u128(1), 1100.0), (Uuid::from_u128(2), 900.0)]);
+        let observations = vec![
+            obs(1, 0, Some(1), Some(1), false),
+            obs(1, 10, Some(1), Some(2), false),
+        ];
+        let stats = compute_voter_stats(&[user(1, "voter")], &observations, &ratings, &config());
+        assert_eq!(stats[0].agreement_pct, Some(50.0));
+    }
+
+    #[test]
+    fn compute_stats_counts_distinct_songs_seen() {
+        let mut first = obs(1, 0, Some(1), Some(1), false);
+        first.track_low = Uuid::from_u128(1);
+        first.track_high = Uuid::from_u128(2);
+        let mut second = obs(1, 10, Some(1), Some(1), false);
+        second.track_low = Uuid::from_u128(2);
+        second.track_high = Uuid::from_u128(3);
+        let stats = compute_voter_stats(
+            &[user(1, "voter")],
+            &[first, second],
+            &HashMap::new(),
+            &config(),
+        );
+        assert_eq!(stats[0].distinct_songs_seen, 3);
+    }
+
+    #[test]
+    fn compute_stats_excludes_non_votes_from_decision_percentiles() {
+        let observations = vec![
+            obs(1, 0, Some(1), Some(1), false),
+            obs(1, 10, None, None, false),
+        ];
+        let stats = compute_voter_stats(
+            &[user(1, "voter")],
+            &observations,
+            &HashMap::new(),
+            &config(),
+        );
+        assert_eq!(stats[0].median_decision_seconds, Some(1.0));
+        assert_eq!(stats[0].p10_decision_seconds, Some(1.0));
+    }
+
+    #[test]
+    fn compute_stats_marks_fast_clickers() {
+        let observations = vec![
+            obs(1, 0, Some(1), Some(1), false),
+            obs(1, 10, Some(11), Some(1), false),
+            obs(1, 20, Some(21), Some(1), false),
+        ];
+        let stats = compute_voter_stats(
+            &[user(1, "voter")],
+            &observations,
+            &HashMap::new(),
+            &config(),
+        );
+        assert!(stats[0].flags.fast_clicker);
+    }
+
+    #[test]
+    fn compute_stats_marks_low_agreement_only_after_the_minimum_votes() {
+        let ratings = HashMap::from([(Uuid::from_u128(1), 1100.0), (Uuid::from_u128(2), 900.0)]);
+        let observations = vec![
+            obs(1, 0, Some(1), Some(2), false),
+            obs(1, 10, Some(1), Some(2), false),
+            obs(1, 20, Some(1), Some(2), false),
+        ];
+        let stats = compute_voter_stats(&[user(1, "voter")], &observations, &ratings, &config());
+        assert!(stats[0].flags.low_agreement);
+    }
+
+    #[test]
+    fn compute_stats_marks_side_bias_beyond_the_margin() {
+        let observations = (0..10)
+            .map(|index| obs(1, index * 10, Some(index * 10 + 10), Some(1), false))
+            .collect::<Vec<_>>();
+        let stats = compute_voter_stats(
+            &[user(1, "voter")],
+            &observations,
+            &HashMap::new(),
+            &config(),
+        );
+        assert!(stats[0].flags.side_bias);
+    }
+
+    #[test]
+    fn compute_stats_preserves_account_metadata() {
+        let mut voter = user(1, "voter");
+        voter.is_admin = true;
+        voter.disabled_at = Some(at(100));
+        let stats = compute_voter_stats(&[voter], &[], &HashMap::new(), &config());
+        assert!(stats[0].is_admin);
+        assert_eq!(stats[0].disabled_at, Some(at(100)));
+    }
+
+    #[test]
+    fn compute_stats_uses_vote_time_for_last_active() {
+        let observations = vec![obs(1, 100, Some(500), Some(1), false)];
+        let stats = compute_voter_stats(
+            &[user(1, "voter")],
+            &observations,
+            &HashMap::new(),
+            &config(),
+        );
+        assert_eq!(stats[0].last_active_at, at(500));
+    }
+
+    fn stat(name: &str, votes: i64, duels: i64) -> VoterStat {
+        VoterStat {
+            id: Uuid::from_u128(votes as u128 + 1),
+            username: name.to_string(),
+            is_admin: false,
+            disabled_at: None,
+            created_at: at(0),
+            votes,
+            duels,
+            no_vote_rate: if duels > 0 {
+                Some((duels - votes) as f64 / duels as f64 * 100.0)
+            } else {
+                None
+            },
+            median_decision_seconds: Some(votes as f64),
+            agreement_pct: Some(votes as f64 * 2.0),
+            sessions: votes,
+            last_active_at: at(votes),
+            p10_decision_seconds: Some(votes as f64 / 2.0),
+            p90_decision_seconds: Some(votes as f64 * 1.5),
+            fast_share_pct: Some(votes as f64 * 3.0),
+            side_bias_pct: Some(votes as f64 * 4.0),
+            avg_duels_per_session: votes as f64,
+            total_voting_time_seconds: votes as f64 * 10.0,
+            distinct_songs_seen: votes * 2,
+            flags: VoterFlags {
+                fast_clicker: votes % 2 == 0,
+                side_bias: votes % 3 == 0,
+                low_agreement: votes % 5 == 0,
+            },
+        }
+    }
+
+    #[test]
+    fn sort_by_username_is_alphabetical() {
+        let mut rows = vec![stat("b", 1, 1), stat("a", 2, 2)];
+        sort_voter_stats(&mut rows, "username");
+        assert_eq!(rows[0].username, "a");
+        assert_eq!(rows[1].username, "b");
+    }
+
+    #[test]
+    fn sort_by_votes_is_descending_with_username_tiebreak() {
+        let mut rows = vec![stat("b", 3, 3), stat("a", 3, 3), stat("c", 1, 1)];
+        sort_voter_stats(&mut rows, "votes");
+        assert_eq!(
+            rows.iter()
+                .map(|row| row.username.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "b", "c"]
+        );
+    }
+
+    #[test]
+    fn sort_by_duels_is_descending() {
+        let mut rows = vec![stat("a", 1, 10), stat("b", 2, 20)];
+        sort_voter_stats(&mut rows, "duels");
+        assert_eq!(rows[0].username, "b");
+    }
+
+    #[test]
+    fn sort_by_no_vote_includes_missing_values_last() {
+        let mut rows = vec![stat("a", 1, 1), stat("b", 1, 0)];
+        sort_voter_stats(&mut rows, "no_vote");
+        assert_eq!(rows[0].username, "a");
+        assert_eq!(rows[1].username, "b");
+    }
+
+    #[test]
+    fn sort_by_median_decision_puts_missing_values_last() {
+        let mut rows = vec![stat("a", 2, 2), stat("b", 1, 0)];
+        rows[1].median_decision_seconds = None;
+        sort_voter_stats(&mut rows, "median_decision");
+        assert_eq!(rows[0].username, "b");
+        assert_eq!(rows[1].username, "a");
+    }
+
+    #[test]
+    fn sort_by_agreement_is_ascending_so_low_agreement_surfaces_first() {
+        let mut rows = vec![stat("a", 1, 1), stat("b", 2, 2)];
+        sort_voter_stats(&mut rows, "agreement");
+        assert_eq!(rows[0].username, "a");
+    }
+
+    #[test]
+    fn sort_by_sessions_is_descending() {
+        let mut rows = vec![stat("a", 1, 1), stat("b", 3, 3)];
+        sort_voter_stats(&mut rows, "sessions");
+        assert_eq!(rows[0].username, "b");
+    }
+
+    #[test]
+    fn sort_by_percentile_columns_is_ascending() {
+        for key in ["p10", "p90"] {
+            let mut rows = vec![stat("a", 3, 3), stat("b", 1, 1)];
+            sort_voter_stats(&mut rows, key);
+            assert_eq!(rows[0].username, "b", "sort {key}");
+        }
+    }
+
+    #[test]
+    fn sort_by_share_columns_is_descending() {
+        for key in [
+            "fast_share",
+            "side_bias",
+            "avg_session",
+            "voting_time",
+            "songs",
+        ] {
+            let mut rows = vec![stat("a", 1, 1), stat("b", 2, 2)];
+            sort_voter_stats(&mut rows, key);
+            assert_eq!(rows[0].username, "b", "sort {key}");
+        }
+    }
+
+    #[test]
+    fn sort_by_flags_puts_flagged_voters_first() {
+        let mut rows = vec![stat("a", 1, 1), stat("b", 2, 2)];
+        sort_voter_stats(&mut rows, "flags");
+        assert_eq!(rows[0].username, "b");
+    }
+
+    #[test]
+    fn unknown_sort_defaults_to_last_active() {
+        let mut rows = vec![stat("a", 1, 1), stat("b", 3, 3)];
+        sort_voter_stats(&mut rows, "not-a-column");
+        assert_eq!(rows[0].username, "b");
+    }
+
+    #[test]
+    fn flag_summary_counts_voters_and_vote_share() {
+        let rows = vec![stat("a", 2, 2), stat("b", 3, 3), stat("c", 5, 5)];
+        let (summary, flagged_voters, share) = summarize_flags(&rows);
+        assert_eq!(summary.len(), 3);
+        assert_eq!(summary[0].key, "fast_clicker");
+        assert_eq!(summary[0].voters, 1);
+        assert_eq!(summary[0].vote_share_pct, 20.0);
+        assert_eq!(flagged_voters, 3);
+        assert_eq!(share, 100.0);
+    }
+
+    #[test]
+    fn flag_summary_handles_no_votes() {
+        let rows = vec![];
+        let (summary, flagged_voters, share) = summarize_flags(&rows);
+        assert_eq!(summary.len(), 3);
+        assert!(summary
+            .iter()
+            .all(|row| row.voters == 0 && row.vote_share_pct == 0.0));
+        assert_eq!(flagged_voters, 0);
+        assert_eq!(share, 0.0);
+    }
+}
