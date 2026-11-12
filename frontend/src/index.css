@@ -262,12 +262,12 @@ body::before {
   }
 
   .pv-cover-thumb {
-    @apply grid size-9 shrink-0 place-items-center overflow-hidden rounded-lg border-2 border-ink bg-paper;
+    @apply relative grid size-9 shrink-0 place-items-center overflow-hidden rounded-lg border-2 border-ink bg-paper;
     box-shadow: 2px 2px 0 0 var(--color-ink);
   }
 
   .pv-cover-thumb img {
-    @apply size-full object-cover;
+    @apply absolute inset-0 size-full object-cover;
   }
 
   .pv-halftone {
@@ -327,7 +327,7 @@ body::before {
   }
 
   .pv-mixtape-cover img {
-    @apply size-full object-cover;
+    @apply absolute inset-0 size-full object-cover;
   }
 
   .pv-mixtape-cover::after {
@@ -472,11 +472,11 @@ body::before {
   }
 
   .pv-tape-cover {
-    @apply grid size-20 shrink-0 place-items-center overflow-hidden rounded-xl border-2 border-ink bg-paper font-serif text-2xl text-muted/40 sm:size-28 sm:text-3xl;
+    @apply relative grid size-20 shrink-0 place-items-center overflow-hidden rounded-xl border-2 border-ink bg-paper font-serif text-2xl text-muted/40 sm:size-28 sm:text-3xl;
   }
 
   .pv-tape-cover img {
-    @apply size-full object-cover;
+    @apply absolute inset-0 size-full object-cover;
   }
 
   .pv-tape-meta h2 {
@@ -866,8 +866,10 @@ body::before {
     cursor: pointer;
   }
 
+  /* Old Safari sizes stretched grid rows from the image's natural size.
+     Keep artwork out of flow so a 640px cover cannot inflate the card. */
   .pv-duel-cover img {
-    @apply size-full object-cover;
+    @apply absolute inset-0 size-full object-cover;
   }
 
   .pv-duel-cover.is-playing {
@@ -1228,7 +1230,7 @@ body::before {
   }
 
   .pv-recent-cover img {
-    @apply size-full object-cover;
+    @apply absolute inset-0 size-full object-cover;
   }
 
   .pv-recent-check {
@@ -1327,7 +1329,7 @@ body::before {
   }
 
   .pv-history-cover img {
-    @apply size-full object-cover;
+    @apply absolute inset-0 size-full object-cover;
   }
 
   .pv-history-cover-action {
